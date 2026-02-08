@@ -31,8 +31,8 @@ func (f *FileUpload) Open() (io.ReadCloser, error) {
 	return file, nil
 }
 
-// parseFileUpload extracts a file upload from a multipart form.
-func parseFileUpload(r *http.Request, fieldName string) (*FileUpload, error) {
+// ParseFileUpload extracts a file upload from a multipart form.
+func ParseFileUpload(r *http.Request, fieldName string) (*FileUpload, error) {
 	file, header, err := r.FormFile(fieldName)
 	if err != nil {
 		return nil, fmt.Errorf("form file %q: %w", fieldName, err)

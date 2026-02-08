@@ -11,6 +11,4 @@ var (
 	TypeToSchema   = typeToSchema
 	StructToSchema = structToSchema
 	JSONFieldName  = jsonFieldName
-
-	ParseFileUpload = parseFileUpload
 )
