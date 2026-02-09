@@ -376,6 +376,17 @@ func extractParameters(t reflect.Type) []Parameter {
 
 // extractRequestBody builds an OpenAPI RequestBody if the request type has a body.
 func extractRequestBody(t reflect.Type, method string, reg *schemaRegistry) *RequestBody {
+	// Form-tagged struct → multipart/form-data.
+	if hasFormTags(t) {
+		schema := formFieldsToSchema(t)
+		return &RequestBody{
+			Required: true,
+			Content: map[string]MediaObj{
+				"multipart/form-data": {Schema: &schema},
+			},
+		}
+	}
+
 	// Has Body field → body is the Body field's type.
 	if bodyField, ok := t.FieldByName("Body"); ok {
 		schema := reg.typeToSchema(bodyField.Type)
@@ -399,6 +410,42 @@ func extractRequestBody(t reflect.Type, method string, reg *schemaRegistry) *Req
 	}
 
 	return nil
+}
+
+// formFieldsToSchema builds a JSONSchema from form-tagged fields.
+func formFieldsToSchema(t reflect.Type) JSONSchema {
+	schema := JSONSchema{
+		Type:       "object",
+		Properties: make(map[string]JSONSchema),
+	}
+
+	for i := range t.NumField() {
+		f := t.Field(i)
+		if !f.IsExported() {
+			continue
+		}
+
+		name := f.Tag.Get("form")
+		if name == "" {
+			continue
+		}
+
+		prop := typeToSchema(f.Type)
+
+		if doc := f.Tag.Get("doc"); doc != "" {
+			prop.Description = doc
+		}
+
+		applyConstraintTags(&prop, f)
+
+		schema.Properties[name] = prop
+
+		if f.Tag.Get("required") == "true" {
+			schema.Required = append(schema.Required, name)
+		}
+	}
+
+	return schema
 }
 
 // tagToIn converts a struct tag name to the OpenAPI "in" field.

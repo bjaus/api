@@ -13,6 +13,7 @@ var (
 	ErrBindHeader = errors.New("bind header")
 	ErrBindCookie = errors.New("bind cookie")
 	ErrBindBody   = errors.New("bind body")
+	ErrBindForm   = errors.New("bind form")
 )
 
 // StatusCoder is implemented by errors or responses that carry an HTTP status code.

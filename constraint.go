@@ -69,6 +69,11 @@ func collectConstraintErrors(rv reflect.Value, prefix string, errs *[]Validation
 			continue
 		}
 
+		// Skip FileUpload — it's a multipart file, not a scalar.
+		if f.Type == reflect.TypeFor[FileUpload]() {
+			continue
+		}
+
 		checkFieldConstraints(f, fv, path, errs)
 
 		// Recurse into nested structs.

@@ -5,6 +5,7 @@ import "reflect"
 // Test-only exports for internal functions.
 var (
 	HasParamTags  = hasParamTags
+	HasFormTags   = hasFormTags
 	HasBodyField  = hasBodyField
 	HasRawRequest = hasRawRequest
 	TagOptions    = tagOptions

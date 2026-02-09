@@ -11,6 +11,9 @@ import (
 	"time"
 )
 
+// maxMultipartMemory is the maximum memory used for multipart form parsing (32 MB).
+const maxMultipartMemory = 32 << 20
+
 // requestCategory describes how a request type should be decoded.
 type requestCategory int
 
@@ -19,12 +22,16 @@ const (
 	catBodyOnly                        // entire struct is the body (no param tags, no Body field)
 	catParams                          // has param tags but no Body field
 	catMixed                           // has Body field (params from tagged fields, body from Body)
+	catForm                            // has form tags (multipart/form-data binding)
 )
 
 // classifyRequest determines how a request type should be decoded.
 func classifyRequest(t reflect.Type) requestCategory {
 	if t == reflect.TypeFor[Void]() {
 		return catVoid
+	}
+	if hasFormTags(t) {
+		return catForm
 	}
 	if hasBodyField(t) {
 		return catMixed
@@ -61,6 +68,10 @@ func decodeRequest[Req any](r *http.Request) (*Req, error) {
 		bodyPtr := bodyField.Addr().Interface()
 		if err := decodeBody(r, bodyPtr); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrBindBody, err)
+		}
+	case catForm:
+		if err := bindFormFields(req, r); err != nil {
+			return nil, err
 		}
 	}
 
@@ -139,6 +150,61 @@ func bindParams(target any, r *http.Request) error {
 		// Embed RawRequest: inject *http.Request.
 		if f.Type == reflect.TypeFor[RawRequest]() {
 			field.Set(reflect.ValueOf(RawRequest{Request: r}))
+		}
+	}
+
+	return nil
+}
+
+// bindFormFields binds multipart form fields and files to struct fields tagged with "form".
+func bindFormFields(target any, r *http.Request) error {
+	if err := r.ParseMultipartForm(maxMultipartMemory); err != nil {
+		return fmt.Errorf("%w: %w", ErrBindForm, err)
+	}
+
+	v := reflect.ValueOf(target)
+	if v.Kind() == reflect.Pointer {
+		v = v.Elem()
+	}
+
+	t := v.Type()
+	for i := range t.NumField() {
+		f := t.Field(i)
+		if !f.IsExported() {
+			continue
+		}
+
+		name := f.Tag.Get("form")
+		if name == "" {
+			continue
+		}
+
+		field := v.Field(i)
+
+		// FileUpload fields: use r.FormFile.
+		if f.Type == reflect.TypeFor[FileUpload]() {
+			file, header, err := r.FormFile(name)
+			if errors.Is(err, http.ErrMissingFile) {
+				continue // optional file — leave zero value
+			}
+			if err != nil {
+				return fmt.Errorf("%w: %s: %w", ErrBindForm, name, err)
+			}
+			field.Set(reflect.ValueOf(FileUpload{
+				Filename: header.Filename,
+				Size:     header.Size,
+				Header:   header,
+				file:     file,
+			}))
+			continue
+		}
+
+		// Scalar fields: use r.FormValue.
+		val := r.FormValue(name)
+		if val != "" {
+			if err := setFieldValue(field, val); err != nil {
+				return fmt.Errorf("%w: %s: %w", ErrBindForm, name, err)
+			}
 		}
 	}
 

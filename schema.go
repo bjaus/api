@@ -167,14 +167,16 @@ func jsonFieldName(f reflect.StructField) string {
 	return name
 }
 
-// isParamField reports whether a struct field has parameter binding tags.
+// isParamField reports whether a struct field has parameter binding tags
+// or form binding tags (form-tagged fields are part of the multipart body,
+// not the JSON body schema).
 func isParamField(f reflect.StructField) bool {
 	for _, tag := range paramTags {
 		if f.Tag.Get(tag) != "" {
 			return true
 		}
 	}
-	return false
+	return f.Tag.Get("form") != ""
 }
 
 const errorSchemaName = "ProblemDetail"
