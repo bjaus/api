@@ -696,3 +696,208 @@ func TestForm_empty_form_value_skipped(t *testing.T) {
 	assert.Equal(t, "Test", body.Title)
 	assert.Equal(t, 0, body.Count)
 }
+
+func TestForm_multiple_file_upload(t *testing.T) {
+	t.Parallel()
+
+	type Req struct {
+		Files []api.FileUpload `form:"files"`
+	}
+	type FileInfo struct {
+		Name string `json:"name"`
+		Size int64  `json:"size"`
+	}
+	type Resp struct {
+		Count int        `json:"count"`
+		Files []FileInfo `json:"files"`
+	}
+
+	r := api.New()
+	api.Post(r, "/upload", func(_ context.Context, req *Req) (*Resp, error) {
+		infos := make([]FileInfo, len(req.Files))
+		for i, f := range req.Files {
+			infos[i] = FileInfo{Name: f.Filename, Size: f.Size}
+		}
+		return &Resp{Count: len(req.Files), Files: infos}, nil
+	})
+
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+
+	fw1, err := w.CreateFormFile("files", "a.txt")
+	require.NoError(t, err)
+	_, err = fw1.Write([]byte("aaa"))
+	require.NoError(t, err)
+
+	fw2, err := w.CreateFormFile("files", "b.txt")
+	require.NoError(t, err)
+	_, err = fw2.Write([]byte("bbbbbb"))
+	require.NoError(t, err)
+
+	fw3, err := w.CreateFormFile("files", "c.txt")
+	require.NoError(t, err)
+	_, err = fw3.Write([]byte("ccccccccc"))
+	require.NoError(t, err)
+
+	require.NoError(t, w.Close())
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, srv.URL+"/upload", &buf)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var body Resp
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	assert.Equal(t, 3, body.Count)
+	assert.Len(t, body.Files, 3)
+
+	// Verify filenames (order matches upload order).
+	names := make([]string, len(body.Files))
+	for i, f := range body.Files {
+		names[i] = f.Name
+	}
+	assert.Contains(t, names, "a.txt")
+	assert.Contains(t, names, "b.txt")
+	assert.Contains(t, names, "c.txt")
+}
+
+func TestForm_multiple_file_upload_empty(t *testing.T) {
+	t.Parallel()
+
+	type Req struct {
+		Title string             `form:"title"`
+		Files []api.FileUpload   `form:"files"`
+	}
+	type Resp struct {
+		Title string `json:"title"`
+		Count int    `json:"count"`
+	}
+
+	r := api.New()
+	api.Post(r, "/upload", func(_ context.Context, req *Req) (*Resp, error) {
+		return &Resp{Title: req.Title, Count: len(req.Files)}, nil
+	})
+
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+
+	// Send form without any files.
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	require.NoError(t, w.WriteField("title", "No Files"))
+	require.NoError(t, w.Close())
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, srv.URL+"/upload", &buf)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var body Resp
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	assert.Equal(t, "No Files", body.Title)
+	assert.Equal(t, 0, body.Count)
+}
+
+func TestForm_multiple_file_upload_content(t *testing.T) {
+	t.Parallel()
+
+	type Req struct {
+		Files []api.FileUpload `form:"files"`
+	}
+	type Resp struct {
+		Contents []string `json:"contents"`
+	}
+
+	r := api.New()
+	api.Post(r, "/upload", func(_ context.Context, req *Req) (*Resp, error) {
+		contents := make([]string, len(req.Files))
+		for i, f := range req.Files {
+			rc, err := f.Open()
+			if err != nil {
+				return nil, err
+			}
+			data, err := io.ReadAll(rc)
+			if err != nil {
+				return nil, err
+			}
+			contents[i] = string(data)
+		}
+		return &Resp{Contents: contents}, nil
+	})
+
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+
+	fw1, err := w.CreateFormFile("files", "one.txt")
+	require.NoError(t, err)
+	_, err = fw1.Write([]byte("first"))
+	require.NoError(t, err)
+
+	fw2, err := w.CreateFormFile("files", "two.txt")
+	require.NoError(t, err)
+	_, err = fw2.Write([]byte("second"))
+	require.NoError(t, err)
+
+	require.NoError(t, w.Close())
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, srv.URL+"/upload", &buf)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var body Resp
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	assert.Len(t, body.Contents, 2)
+	assert.Contains(t, body.Contents, "first")
+	assert.Contains(t, body.Contents, "second")
+}
+
+func TestForm_multiple_file_upload_openapi(t *testing.T) {
+	t.Parallel()
+
+	type Req struct {
+		Files []api.FileUpload `form:"files" doc:"Upload multiple files" required:"true"`
+	}
+	type Resp struct {
+		OK bool `json:"ok"`
+	}
+
+	r := api.New()
+	api.Post(r, "/upload", func(_ context.Context, req *Req) (*Resp, error) {
+		return &Resp{OK: true}, nil
+	})
+
+	spec := r.Spec()
+
+	media := spec.Paths["/upload"]["post"].RequestBody.Content["multipart/form-data"]
+	require.NotNil(t, media.Schema)
+
+	filesProp := media.Schema.Properties["files"]
+	assert.Equal(t, "array", filesProp.Type)
+	require.NotNil(t, filesProp.Items)
+	assert.Equal(t, "string", filesProp.Items.Type)
+	assert.Equal(t, "binary", filesProp.Items.Format)
+	assert.Equal(t, "Upload multiple files", filesProp.Description)
+	assert.Contains(t, media.Schema.Required, "files")
+}

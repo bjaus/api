@@ -199,6 +199,29 @@ func bindFormFields(target any, r *http.Request) error {
 			continue
 		}
 
+		// []FileUpload fields: iterate all files for this field name.
+		if f.Type == reflect.TypeFor[[]FileUpload]() {
+			if r.MultipartForm == nil || len(r.MultipartForm.File[name]) == 0 {
+				continue // no files — leave nil slice
+			}
+			headers := r.MultipartForm.File[name]
+			uploads := make([]FileUpload, 0, len(headers))
+			for _, header := range headers {
+				file, err := header.Open()
+				if err != nil {
+					return fmt.Errorf("%w: %s: %w", ErrBindForm, name, err)
+				}
+				uploads = append(uploads, FileUpload{
+					Filename: header.Filename,
+					Size:     header.Size,
+					Header:   header,
+					file:     file,
+				})
+			}
+			field.Set(reflect.ValueOf(uploads))
+			continue
+		}
+
 		// Scalar fields: use r.FormValue.
 		val := r.FormValue(name)
 		if val != "" {
