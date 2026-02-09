@@ -5,6 +5,12 @@
 //
 //	go run ./cmd/sample
 //
+// Generate the OpenAPI spec:
+//
+//	go run ./cmd/sample -spec                        — print to stdout
+//	go run ./cmd/sample -spec -o openapi.json        — write to file
+//	go run ./cmd/sample -spec | pbcopy               — copy to clipboard (macOS)
+//
 // Then explore:
 //
 //	GET  http://localhost:8080/openapi.json          — OpenAPI spec
@@ -23,6 +29,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -36,8 +43,35 @@ import (
 )
 
 func main() {
+	specFlag := flag.Bool("spec", false, "Print the OpenAPI spec to stdout and exit")
+	outFlag := flag.String("o", "", "Output file for the spec (requires -spec)")
+	flag.Parse()
+
+	r := newRouter()
+
+	if *specFlag {
+		if err := writeSpec(r, *outFlag); err != nil {
+			slog.Error("spec generation failed", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	slog.Info("starting server", "addr", ":8080", "spec", "http://localhost:8080/openapi.json")
+
+	if err := r.ListenAndServe(ctx, ":8080"); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		slog.Error("server error", "err", err)
+	}
+
+	slog.Info("server stopped")
+}
+
+func newRouter() *api.Router {
 	r := api.New(
 		api.WithTitle("Sample API"),
 		api.WithVersion("1.0.0"),
@@ -122,21 +156,27 @@ func main() {
 		api.WithTags("ops"),
 	)
 
-	// ---------- start ----------
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-
-	slog.Info("starting server", "addr", ":8080", "spec", "http://localhost:8080/openapi.json")
-
-	if err := r.ListenAndServe(ctx, ":8080"); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		slog.Error("server error", "err", err)
-	}
-
-	slog.Info("server stopped")
+	return r
 }
 
 // ---------------------------------------------------------------------------
+func writeSpec(r *api.Router, outFile string) error {
+	w := os.Stdout
+	if outFile != "" {
+		f, err := os.Create(outFile) //nolint:gosec // user-provided CLI flag
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if err := f.Close(); err != nil {
+				slog.Error("failed to close output file", "err", err)
+			}
+		}()
+		w = f
+	}
+	return r.WriteSpec(w)
+}
+
 // In-memory store
 // ---------------------------------------------------------------------------
 
