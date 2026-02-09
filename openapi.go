@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net/http"
 	"reflect"
 	"strconv"
 	"strings"
@@ -49,9 +50,9 @@ type RequestBody struct {
 	Content  map[string]MediaObj `json:"content"`
 }
 
-// MediaObj is a media type object with a schema.
+// MediaObj is a media type object with an optional schema.
 type MediaObj struct {
-	Schema JSONSchema `json:"schema"`
+	Schema *JSONSchema `json:"schema,omitempty"`
 }
 
 // OperationResp maps HTTP status codes to response objects.
@@ -107,19 +108,43 @@ func buildOperation(ri *routeInfo) Operation {
 	}
 
 	// Build response.
-	if ri.respType != nil && ri.respType != reflect.TypeFor[Void]() {
-		statusStr := statusToString(ri.status)
-		respSchema := typeToSchema(ri.respType)
-		op.Responses[statusStr] = ResponseObj{
+	status := ri.status
+	if status == 0 {
+		status = http.StatusOK
+	}
+
+	switch {
+	case ri.respType == nil || ri.respType == reflect.TypeFor[Void]():
+		if status == 0 || status == http.StatusOK {
+			status = http.StatusNoContent
+		}
+		op.Responses[statusToString(status)] = ResponseObj{
+			Description: "No content",
+		}
+
+	case ri.respType == reflect.TypeFor[Stream]():
+		op.Responses[statusToString(status)] = ResponseObj{
 			Description: "Successful response",
 			Content: map[string]MediaObj{
-				"application/json": {Schema: respSchema},
+				"application/octet-stream": {},
 			},
 		}
-	} else {
-		statusStr := statusToString(ri.status)
-		op.Responses[statusStr] = ResponseObj{
-			Description: "No content",
+
+	case ri.respType == reflect.TypeFor[SSEStream]():
+		op.Responses[statusToString(status)] = ResponseObj{
+			Description: "Successful response",
+			Content: map[string]MediaObj{
+				"text/event-stream": {Schema: &JSONSchema{Type: "string"}},
+			},
+		}
+
+	default:
+		respSchema := typeToSchema(ri.respType)
+		op.Responses[statusToString(status)] = ResponseObj{
+			Description: "Successful response",
+			Content: map[string]MediaObj{
+				"application/json": {Schema: &respSchema},
+			},
 		}
 	}
 
@@ -184,7 +209,7 @@ func extractRequestBody(t reflect.Type, method string) *RequestBody {
 		return &RequestBody{
 			Required: true,
 			Content: map[string]MediaObj{
-				"application/json": {Schema: schema},
+				"application/json": {Schema: &schema},
 			},
 		}
 	}
@@ -195,7 +220,7 @@ func extractRequestBody(t reflect.Type, method string) *RequestBody {
 		return &RequestBody{
 			Required: true,
 			Content: map[string]MediaObj{
-				"application/json": {Schema: schema},
+				"application/json": {Schema: &schema},
 			},
 		}
 	}

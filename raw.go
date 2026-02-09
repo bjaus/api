@@ -14,4 +14,5 @@ type OperationInfo struct {
 	Summary     string
 	Description string
 	Tags        []string
+	Status      int
 }

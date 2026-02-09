@@ -126,6 +126,7 @@ func Raw(reg Registrar, method, pattern string, h RawHandler, info OperationInfo
 		summary: info.Summary,
 		desc:    info.Description,
 		tags:    info.Tags,
+		status:  info.Status,
 		handler: http.HandlerFunc(h),
 	}
 

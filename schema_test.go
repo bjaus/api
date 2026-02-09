@@ -47,7 +47,7 @@ func TestTypeToSchema(t *testing.T) {
 		},
 		"[]byte": {
 			typ:    reflect.TypeFor[[]byte](),
-			expect: api.JSONSchema{Type: "string", Format: "byte"},
+			expect: api.JSONSchema{Type: "string", ContentEncoding: "base64"},
 		},
 		"[]string": {
 			typ: reflect.TypeFor[[]string](),

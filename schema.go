@@ -8,14 +8,15 @@ import (
 
 // JSONSchema represents a JSON Schema object (subset for OpenAPI 3.1).
 type JSONSchema struct {
-	Type        string                `json:"type,omitempty"`
-	Format      string                `json:"format,omitempty"`
-	Properties  map[string]JSONSchema `json:"properties,omitempty"`
-	Items       *JSONSchema           `json:"items,omitempty"`
-	Required    []string              `json:"required,omitempty"`
-	Description string                `json:"description,omitempty"`
-	Enum        []string              `json:"enum,omitempty"`
-	Ref         string                `json:"$ref,omitempty"`
+	Type            string                `json:"type,omitempty"`
+	Format          string                `json:"format,omitempty"`
+	ContentEncoding string                `json:"contentEncoding,omitempty"`
+	Properties      map[string]JSONSchema `json:"properties,omitempty"`
+	Items           *JSONSchema           `json:"items,omitempty"`
+	Required        []string              `json:"required,omitempty"`
+	Description     string                `json:"description,omitempty"`
+	Enum            []string              `json:"enum,omitempty"`
+	Ref             string                `json:"$ref,omitempty"`
 
 	// AdditionalProperties can be true (any) or a schema.
 	AdditionalProperties *JSONSchema `json:"additionalProperties,omitempty"`
@@ -36,12 +37,10 @@ func typeToSchema(t reflect.Type) JSONSchema {
 		return JSONSchema{Type: "string", Format: "duration"}
 	case reflect.TypeFor[Void]():
 		return JSONSchema{}
-	case reflect.TypeFor[Stream]():
-		return JSONSchema{Type: "string", Format: "binary"}
-	case reflect.TypeFor[SSEStream]():
-		return JSONSchema{Type: "string", Format: "event-stream"}
+	case reflect.TypeFor[Stream](), reflect.TypeFor[SSEStream]():
+		return JSONSchema{}
 	case reflect.TypeFor[FileUpload]():
-		return JSONSchema{Type: "string", Format: "binary"}
+		return JSONSchema{}
 	}
 
 	//exhaustive:ignore
@@ -58,7 +57,7 @@ func typeToSchema(t reflect.Type) JSONSchema {
 		return JSONSchema{Type: "number"}
 	case reflect.Slice:
 		if t.Elem().Kind() == reflect.Uint8 {
-			return JSONSchema{Type: "string", Format: "byte"}
+			return JSONSchema{Type: "string", ContentEncoding: "base64"}
 		}
 		items := typeToSchema(t.Elem())
 		return JSONSchema{Type: "array", Items: &items}
