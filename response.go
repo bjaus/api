@@ -2,14 +2,37 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 )
 
+// CookieSetter is optionally implemented by response types to set cookies.
+type CookieSetter interface {
+	Cookies() []*http.Cookie
+}
+
+// HeaderSetter is optionally implemented by response types to set response headers.
+type HeaderSetter interface {
+	SetHeaders(h http.Header)
+}
+
+// Redirect is returned from a handler to issue an HTTP redirect.
+type Redirect struct {
+	URL    string
+	Status int
+}
+
 // encodeResponse writes the response to the http.ResponseWriter.
-// It handles Void (204), Stream, SSEStream, StatusCoder, and JSON.
+// It handles Void (204), Redirect, Stream, SSEStream, CookieSetter, HeaderSetter,
+// StatusCoder, and JSON.
 func encodeResponse(w http.ResponseWriter, resp any, defaultStatus int) {
-	if resp == nil {
-		w.WriteHeader(http.StatusNoContent)
+	// Redirect response.
+	if rd, ok := resp.(*Redirect); ok {
+		status := rd.Status
+		if status == 0 {
+			status = http.StatusFound
+		}
+		http.Redirect(w, nil, rd.URL, status)
 		return
 	}
 
@@ -25,10 +48,17 @@ func encodeResponse(w http.ResponseWriter, resp any, defaultStatus int) {
 		return
 	}
 
-	status := defaultStatus
-	if status == 0 {
-		status = http.StatusOK
+	// Apply cookies and headers before writing status.
+	if cs, ok := resp.(CookieSetter); ok {
+		for _, c := range cs.Cookies() {
+			http.SetCookie(w, c)
+		}
 	}
+	if hs, ok := resp.(HeaderSetter); ok {
+		hs.SetHeaders(w.Header())
+	}
+
+	status := defaultStatus
 
 	// Let the response override the status dynamically.
 	if sc, ok := resp.(StatusCoder); ok {
@@ -41,13 +71,34 @@ func encodeResponse(w http.ResponseWriter, resp any, defaultStatus int) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-// writeErrorResponse writes an error as a JSON response.
+// writeErrorResponse writes an error as an RFC 9457 problem details response.
 func writeErrorResponse(w http.ResponseWriter, err error) {
 	status := ErrorStatus(err)
-	w.Header().Set("Content-Type", "application/json")
+
+	// If the error is already a ProblemDetail, use it directly.
+	var pd *ProblemDetail
+	if ok := isProblemDetail(err, &pd); ok {
+		w.Header().Set("Content-Type", "application/problem+json")
+		w.WriteHeader(pd.Status)
+		//nolint:errcheck,errchkjson,gosec // best-effort after WriteHeader
+		json.NewEncoder(w).Encode(pd)
+		return
+	}
+
+	// Convert any error into a ProblemDetail.
+	problem := &ProblemDetail{
+		Type:   "about:blank",
+		Title:  http.StatusText(status),
+		Status: status,
+		Detail: err.Error(),
+	}
+
+	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(status)
 	//nolint:errcheck,errchkjson,gosec // best-effort after WriteHeader
-	json.NewEncoder(w).Encode(map[string]string{
-		"error": err.Error(),
-	})
+	json.NewEncoder(w).Encode(problem)
+}
+
+func isProblemDetail(err error, target **ProblemDetail) bool {
+	return errors.As(err, target)
 }

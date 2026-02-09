@@ -20,6 +20,36 @@ type StatusCoder interface {
 	StatusCode() int
 }
 
+// ProblemDetail is an RFC 9457 problem details response.
+//
+//nolint:errname // RFC 9457 standard name
+type ProblemDetail struct {
+	Type     string            `json:"type,omitempty"`
+	Title    string            `json:"title,omitempty"`
+	Status   int               `json:"status"`
+	Detail   string            `json:"detail,omitempty"`
+	Instance string            `json:"instance,omitempty"`
+	Errors   []ValidationError `json:"errors,omitempty"`
+}
+
+// Error returns the detail message (or title if detail is empty).
+func (p *ProblemDetail) Error() string {
+	if p.Detail != "" {
+		return p.Detail
+	}
+	return p.Title
+}
+
+// StatusCode returns the HTTP status code.
+func (p *ProblemDetail) StatusCode() int { return p.Status }
+
+// ValidationError describes a single field validation failure.
+type ValidationError struct {
+	Field   string `json:"field"`
+	Message string `json:"message"`
+	Value   any    `json:"value,omitempty"`
+}
+
 // HTTPError is an error with an HTTP status code.
 type HTTPError struct {
 	Status  int    `json:"status"`

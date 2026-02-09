@@ -161,3 +161,103 @@ func TestRegister_Raw(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, "true", resp.Header.Get("X-Raw"))
 }
+
+func TestBuildHandler_constraint_validation_failure(t *testing.T) {
+	t.Parallel()
+
+	type Req struct {
+		Body struct {
+			Name string `json:"name" minLength:"5"`
+		}
+	}
+	type Resp struct {
+		OK bool `json:"ok"`
+	}
+
+	r := api.New()
+	api.Post(r, "/validate", func(_ context.Context, req *Req) (*Resp, error) {
+		return &Resp{OK: true}, nil
+	})
+
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, srv.URL+"/validate", strings.NewReader(`{"name":"ab"}`))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Equal(t, "application/problem+json", resp.Header.Get("Content-Type"))
+
+	var body api.ProblemDetail
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	assert.Equal(t, "Validation Failed", body.Title)
+	require.Len(t, body.Errors, 1)
+	assert.Equal(t, "body.name", body.Errors[0].Field)
+}
+
+type failValidator struct{}
+
+func (f *failValidator) Validate(_ any) error {
+	return api.Error(http.StatusUnprocessableEntity, "global validator rejected")
+}
+
+func TestBuildHandler_global_validator_failure(t *testing.T) {
+	t.Parallel()
+
+	type Resp struct {
+		OK bool `json:"ok"`
+	}
+
+	r := api.New(api.WithValidator(&failValidator{}))
+	api.Post(r, "/check", func(_ context.Context, _ *api.Void) (*Resp, error) {
+		return &Resp{OK: true}, nil
+	})
+
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, srv.URL+"/check", nil)
+	require.NoError(t, err)
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+
+	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+}
+
+func TestRaw_on_group_with_middleware(t *testing.T) {
+	t.Parallel()
+
+	r := api.New()
+
+	mw := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			w.Header().Set("X-Group-MW", "applied")
+			next.ServeHTTP(w, req)
+		})
+	}
+
+	g := r.Group("/api", api.WithGroupMiddleware(mw))
+	api.Raw(g, http.MethodGet, "/raw", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}, api.OperationInfo{Summary: "Raw endpoint"})
+
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/api/raw", nil)
+	require.NoError(t, err)
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "applied", resp.Header.Get("X-Group-MW"))
+}

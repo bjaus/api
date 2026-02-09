@@ -107,8 +107,10 @@ func TestRouter_error_response(t *testing.T) {
 	defer func() { require.NoError(t, resp.Body.Close()) }()
 
 	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+	assert.Equal(t, "application/problem+json", resp.Header.Get("Content-Type"))
 
-	var body map[string]string
+	var body api.ProblemDetail
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
-	assert.Equal(t, "bad data", body["error"])
+	assert.Equal(t, http.StatusUnprocessableEntity, body.Status)
+	assert.Equal(t, "bad data", body.Detail)
 }

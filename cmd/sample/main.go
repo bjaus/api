@@ -14,6 +14,7 @@
 // Then explore:
 //
 //	GET  http://localhost:8080/openapi.json          — OpenAPI spec
+//	GET  http://localhost:8080/docs                  — interactive API docs
 //	GET  http://localhost:8080/v1/health              — health check
 //	GET  http://localhost:8080/v1/users               — list users
 //	POST http://localhost:8080/v1/users               — create user
@@ -62,7 +63,11 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	slog.Info("starting server", "addr", ":8080", "spec", "http://localhost:8080/openapi.json")
+	slog.Info("starting server",
+		"addr", ":8080",
+		"spec", "http://localhost:8080/openapi.json",
+		"docs", "http://localhost:8080/docs",
+	)
 
 	if err := r.ListenAndServe(ctx, ":8080"); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("server error", "err", err)
@@ -72,29 +77,61 @@ func main() {
 }
 
 func newRouter() *api.Router {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
 	r := api.New(
 		api.WithTitle("Sample API"),
 		api.WithVersion("1.0.0"),
-		api.WithValidator(&bodyLengthValidator{maxBytes: 1 << 20}), // 1 MB
+		api.WithValidator(&bodyLengthValidator{maxBytes: 1 << 20}),
+
+		// Phase A: OpenAPI enhancements.
+		api.WithServers(
+			api.Server{URL: "http://localhost:8080", Description: "Local development"},
+		),
+		api.WithSecurityScheme("bearerAuth", api.SecurityScheme{
+			Type:         "http",
+			Scheme:       "bearer",
+			BearerFormat: "JWT",
+			Description:  "JWT bearer token",
+		}),
+		api.WithGlobalSecurity("bearerAuth"),
+		api.WithTagDescriptions(map[string]string{
+			"v1":        "Version 1 API",
+			"users":     "User management",
+			"ops":       "Operational endpoints",
+			"streaming": "Real-time streaming",
+			"files":     "File upload and download",
+		}),
 	)
 
-	// Global middleware.
+	// Global middleware — now using built-in middleware.
 	r.Use(api.Recovery())
-	r.Use(requestLogger())
-	r.Use(cors())
+	r.Use(api.RequestID())
+	r.Use(api.Logger(logger))
+	r.Use(api.CORS())
+	r.Use(api.Secure())
+	r.Use(api.BodyLimit(1 << 20)) // 1 MB
+	r.Use(api.Timeout(30 * time.Second))
 
-	// Serve the OpenAPI spec at the root level.
+	// Serve the OpenAPI spec and interactive docs.
 	r.ServeSpec("/openapi.json")
+	r.ServeSpecYAML("/openapi.yaml")
+	r.ServeDocs("/docs")
+
+	// Pprof profiling (hidden from OpenAPI spec).
+	api.Pprof(r, "/debug/pprof")
 
 	// ---------- v1 group ----------
 
 	v1 := r.Group("/v1", api.WithGroupTags("v1"))
 
-	// Health.
+	// Health — no security required.
 	api.Get(v1, "/health", handleHealth,
 		api.WithSummary("Health check"),
 		api.WithDescription("Returns the current server time and status."),
 		api.WithTags("ops"),
+		api.WithOperationID("healthCheck"),
+		api.WithNoSecurity(),
 	)
 
 	// Users CRUD.
@@ -107,6 +144,11 @@ func newRouter() *api.Router {
 		api.WithStatus(http.StatusCreated),
 		api.WithSummary("Create user"),
 		api.WithTags("users"),
+		api.WithErrors(http.StatusConflict),
+		api.WithLink("GetUser", api.Link{
+			OperationID: "getV1UsersByById",
+			Description: "Fetch the newly created user",
+		}),
 	)
 	api.Get(v1, "/users/{id}", handleGetUser,
 		api.WithSummary("Get user by ID"),
@@ -139,6 +181,7 @@ func newRouter() *api.Router {
 		api.WithSummary("Event stream"),
 		api.WithDescription("Server-Sent Events stream that emits a tick every second."),
 		api.WithTags("streaming"),
+		api.WithNoSecurity(),
 	)
 
 	// Raw handler escape hatch (e.g. WebSocket placeholder).
@@ -287,9 +330,9 @@ func (s *userStore) getAvatar(id string) ([]byte, bool) {
 // User is the core domain entity.
 type User struct {
 	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Email     string    `json:"email"`
-	Role      string    `json:"role"`
+	Name      string    `json:"name" minLength:"1" maxLength:"100"`
+	Email     string    `json:"email" pattern:"^[^@]+@[^@]+$"`
+	Role      string    `json:"role" enum:"admin,member,viewer"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -308,8 +351,8 @@ type HealthResp struct {
 
 type ListUsersReq struct {
 	Role   string `query:"role" doc:"Filter by role (admin, member)" default:""`
-	Limit  int    `query:"limit" doc:"Max results" default:"50"`
-	Offset int    `query:"offset" doc:"Pagination offset" default:"0"`
+	Limit  int    `query:"limit" doc:"Max results" default:"50" minimum:"1" maximum:"100"`
+	Offset int    `query:"offset" doc:"Pagination offset" default:"0" minimum:"0"`
 }
 
 type ListUsersResp struct {
@@ -321,9 +364,9 @@ type ListUsersResp struct {
 
 type CreateUserReq struct {
 	Body struct {
-		Name  string `json:"name" required:"true" doc:"Display name"`
-		Email string `json:"email" required:"true" doc:"Email address"`
-		Role  string `json:"role" doc:"User role (admin, member)" default:"member"`
+		Name  string `json:"name" required:"true" doc:"Display name" minLength:"1" maxLength:"100" example:"Alice"`
+		Email string `json:"email" required:"true" doc:"Email address" example:"alice@example.com"`
+		Role  string `json:"role" doc:"User role (admin, member)" default:"member" enum:"admin,member,viewer"`
 	}
 }
 
@@ -525,39 +568,6 @@ func handleLegacy(_ context.Context, _ *api.Void) (*LegacyResp, error) {
 }
 
 // ---------------------------------------------------------------------------
-// Middleware
-// ---------------------------------------------------------------------------
-
-func requestLogger() api.Middleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			start := time.Now()
-			next.ServeHTTP(w, r)
-			slog.Info("request",
-				"method", r.Method,
-				"path", r.URL.Path,
-				"duration", time.Since(start),
-			)
-		})
-	}
-}
-
-func cors() api.Middleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-			if r.Method == http.MethodOptions {
-				w.WriteHeader(http.StatusNoContent)
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-// ---------------------------------------------------------------------------
 // Global validator
 // ---------------------------------------------------------------------------
 
@@ -566,9 +576,6 @@ type bodyLengthValidator struct {
 }
 
 func (v *bodyLengthValidator) Validate(req any) error {
-	// This demonstrates the global Validator interface.
-	// The SelfValidator on CreateUserReq runs first (per-type),
-	// then this global validator runs for all requests.
 	type withRaw interface{ GetRequest() *http.Request }
 	if rr, ok := req.(withRaw); ok {
 		r := rr.GetRequest()

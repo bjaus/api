@@ -10,11 +10,12 @@ import (
 type Registrar interface {
 	addRoute(ri routeInfo)
 	getValidator() Validator
+	getErrorHandler() ErrorHandler
 	routeMiddleware() []Middleware
 }
 
-func (r *Router) getValidator() Validator { return r.validator }
-
+func (r *Router) getValidator() Validator     { return r.validator }
+func (r *Router) getErrorHandler() ErrorHandler { return r.errorHandler }
 func (r *Router) routeMiddleware() []Middleware { return nil }
 
 // register is the internal generic registration function.
@@ -40,9 +41,10 @@ func register[Req, Resp any](reg Registrar, method, pattern string, h Handler[Re
 	}
 
 	validator := reg.getValidator()
+	errHandler := reg.getErrorHandler()
 	routeMW := reg.routeMiddleware()
 
-	ri.handler = buildHandler(h, ri.status, validator)
+	ri.handler = buildHandler(h, ri.status, validator, errHandler)
 
 	// Apply route-level middleware (from Group).
 	for i := len(routeMW) - 1; i >= 0; i-- {
@@ -53,18 +55,32 @@ func register[Req, Resp any](reg Registrar, method, pattern string, h Handler[Re
 }
 
 // buildHandler wraps a typed Handler into an http.Handler.
-func buildHandler[Req, Resp any](h Handler[Req, Resp], defaultStatus int, validator Validator) http.Handler {
+func buildHandler[Req, Resp any](h Handler[Req, Resp], defaultStatus int, validator Validator, errHandler ErrorHandler) http.Handler {
+	writeErr := func(w http.ResponseWriter, r *http.Request, err error) {
+		if errHandler != nil {
+			errHandler(w, r, err)
+			return
+		}
+		writeErrorResponse(w, err)
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		req, err := decodeRequest[Req](r)
 		if err != nil {
-			writeErrorResponse(w, Error(http.StatusBadRequest, err.Error()))
+			writeErr(w, r, Error(http.StatusBadRequest, err.Error()))
+			return
+		}
+
+		// Run constraint validation on struct tags.
+		if err := validateConstraints(req); err != nil {
+			writeErr(w, r, err)
 			return
 		}
 
 		// Run SelfValidator if implemented.
 		if sv, ok := any(req).(SelfValidator); ok {
 			if err := sv.Validate(); err != nil {
-				writeErrorResponse(w, err)
+				writeErr(w, r, err)
 				return
 			}
 		}
@@ -72,14 +88,14 @@ func buildHandler[Req, Resp any](h Handler[Req, Resp], defaultStatus int, valida
 		// Run global validator if set.
 		if validator != nil {
 			if err := validator.Validate(req); err != nil {
-				writeErrorResponse(w, err)
+				writeErr(w, r, err)
 				return
 			}
 		}
 
 		resp, err := h(r.Context(), req)
 		if err != nil {
-			writeErrorResponse(w, err)
+			writeErr(w, r, err)
 			return
 		}
 

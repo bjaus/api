@@ -6,6 +6,7 @@ type Group struct {
 	prefix     string
 	middleware []Middleware
 	tags       []string
+	security   []string
 }
 
 // GroupOption configures a Group.
@@ -25,6 +26,13 @@ func WithGroupMiddleware(mw ...Middleware) GroupOption {
 	}
 }
 
+// WithGroupSecurity sets security requirements for all routes in the group.
+func WithGroupSecurity(schemes ...string) GroupOption {
+	return func(g *Group) {
+		g.security = append(g.security, schemes...)
+	}
+}
+
 // Group creates a new route group with the given prefix and options.
 func (r *Router) Group(prefix string, opts ...GroupOption) *Group {
 	g := &Group{
@@ -41,9 +49,12 @@ func (r *Router) Group(prefix string, opts ...GroupOption) *Group {
 func (g *Group) addRoute(ri routeInfo) {
 	ri.pattern = g.prefix + ri.pattern
 	ri.tags = append(g.tags, ri.tags...)
+	if len(g.security) > 0 && len(ri.security) == 0 && !ri.noSecurity {
+		ri.security = g.security
+	}
 	g.router.addRoute(ri)
 }
 
-func (g *Group) getValidator() Validator { return g.router.validator }
-
+func (g *Group) getValidator() Validator       { return g.router.validator }
+func (g *Group) getErrorHandler() ErrorHandler { return g.router.errorHandler }
 func (g *Group) routeMiddleware() []Middleware { return g.middleware }

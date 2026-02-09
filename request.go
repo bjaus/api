@@ -73,9 +73,6 @@ func bindParams(target any, r *http.Request) error {
 	if v.Kind() == reflect.Pointer {
 		v = v.Elem()
 	}
-	if v.Kind() != reflect.Struct {
-		return nil
-	}
 
 	t := v.Type()
 	for i := range t.NumField() {

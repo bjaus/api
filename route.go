@@ -13,8 +13,17 @@ type routeInfo struct {
 	summary string
 	desc    string
 	tags    []string
-	status  int
+	status     int
 	deprecated bool
+	errors     []int
+
+	operationID string
+	security    []string
+	noSecurity  bool
+
+	extensions map[string]any
+	links      map[string]Link
+	callbacks  map[string]map[string]PathItem
 
 	reqType  reflect.Type
 	respType reflect.Type
@@ -57,5 +66,64 @@ func WithTags(tags ...string) RouteOption {
 func WithDeprecated() RouteOption {
 	return func(ri *routeInfo) {
 		ri.deprecated = true
+	}
+}
+
+// WithErrors declares additional HTTP error status codes for the OpenAPI spec.
+func WithErrors(codes ...int) RouteOption {
+	return func(ri *routeInfo) {
+		ri.errors = append(ri.errors, codes...)
+	}
+}
+
+// WithOperationID sets a custom OpenAPI operationId.
+func WithOperationID(id string) RouteOption {
+	return func(ri *routeInfo) {
+		ri.operationID = id
+	}
+}
+
+// WithSecurity sets security scheme requirements for this route.
+func WithSecurity(schemes ...string) RouteOption {
+	return func(ri *routeInfo) {
+		ri.security = append(ri.security, schemes...)
+	}
+}
+
+// WithNoSecurity disables security for this route (overrides global security).
+func WithNoSecurity() RouteOption {
+	return func(ri *routeInfo) {
+		ri.noSecurity = true
+	}
+}
+
+// WithExtension adds an OpenAPI extension to the operation.
+// The key must start with "x-".
+func WithExtension(key string, value any) RouteOption {
+	return func(ri *routeInfo) {
+		if ri.extensions == nil {
+			ri.extensions = make(map[string]any)
+		}
+		ri.extensions[key] = value
+	}
+}
+
+// WithLink adds an OpenAPI link to the operation's response.
+func WithLink(name string, link Link) RouteOption {
+	return func(ri *routeInfo) {
+		if ri.links == nil {
+			ri.links = make(map[string]Link)
+		}
+		ri.links[name] = link
+	}
+}
+
+// WithCallback adds an OpenAPI callback to the operation.
+func WithCallback(name string, cb map[string]PathItem) RouteOption {
+	return func(ri *routeInfo) {
+		if ri.callbacks == nil {
+			ri.callbacks = make(map[string]map[string]PathItem)
+		}
+		ri.callbacks[name] = cb
 	}
 }

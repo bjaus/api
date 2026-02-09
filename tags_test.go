@@ -44,12 +44,57 @@ func TestHasParamTags(t *testing.T) {
 			typ:    reflect.TypeFor[string](),
 			expect: false,
 		},
+		"struct with unexported fields only": {
+			typ: reflect.TypeOf(struct {
+				_ string `path:"id"`
+			}{}),
+			expect: false,
+		},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, tc.expect, api.HasParamTags(tc.typ))
+		})
+	}
+}
+
+func TestHasRawRequest(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		typ    reflect.Type
+		expect bool
+	}{
+		"with RawRequest": {
+			typ: reflect.TypeOf(struct {
+				api.RawRequest
+			}{}),
+			expect: true,
+		},
+		"without RawRequest": {
+			typ: reflect.TypeOf(struct {
+				Name string
+			}{}),
+			expect: false,
+		},
+		"pointer to struct with RawRequest": {
+			typ: reflect.TypeOf(&struct {
+				api.RawRequest
+			}{}),
+			expect: true,
+		},
+		"non-struct": {
+			typ:    reflect.TypeFor[string](),
+			expect: false,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.expect, api.HasRawRequest(tc.typ))
 		})
 	}
 }
@@ -71,6 +116,16 @@ func TestHasBodyField(t *testing.T) {
 			typ: reflect.TypeOf(struct {
 				Name string
 			}{}),
+			expect: false,
+		},
+		"pointer to struct with Body": {
+			typ: reflect.TypeOf(&struct {
+				Body struct{ Name string }
+			}{}),
+			expect: true,
+		},
+		"non-struct": {
+			typ:    reflect.TypeFor[int](),
 			expect: false,
 		},
 	}

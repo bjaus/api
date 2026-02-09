@@ -17,7 +17,20 @@ type Router struct {
 	title   string
 	version string
 
-	validator Validator
+	servers         []Server
+	securitySchemes map[string]SecurityScheme
+	security        []string
+	tagDescs        map[string]string
+
+	webhooks map[string]PathItem
+
+	validator    Validator
+	errorHandler ErrorHandler
+
+	encoders []Encoder
+	decoders []Decoder
+
+	tracer SpanStarter
 
 	mu sync.Mutex
 }
@@ -43,6 +56,84 @@ func WithVersion(version string) RouterOption {
 func WithValidator(v Validator) RouterOption {
 	return func(r *Router) {
 		r.validator = v
+	}
+}
+
+// WithServers sets the OpenAPI servers array.
+func WithServers(servers ...Server) RouterOption {
+	return func(r *Router) {
+		r.servers = servers
+	}
+}
+
+// WithSecurityScheme registers a named security scheme for the OpenAPI spec.
+func WithSecurityScheme(name string, scheme SecurityScheme) RouterOption {
+	return func(r *Router) {
+		if r.securitySchemes == nil {
+			r.securitySchemes = make(map[string]SecurityScheme)
+		}
+		r.securitySchemes[name] = scheme
+	}
+}
+
+// WithGlobalSecurity sets global security requirements by scheme name.
+func WithGlobalSecurity(schemes ...string) RouterOption {
+	return func(r *Router) {
+		r.security = append(r.security, schemes...)
+	}
+}
+
+// WithTagDescriptions sets tag descriptions for the OpenAPI spec.
+func WithTagDescriptions(descs map[string]string) RouterOption {
+	return func(r *Router) {
+		r.tagDescs = descs
+	}
+}
+
+// ErrorHandler is a custom error response writer.
+type ErrorHandler func(w http.ResponseWriter, r *http.Request, err error)
+
+// WithErrorHandler sets a custom error handler for the router.
+func WithErrorHandler(h ErrorHandler) RouterOption {
+	return func(r *Router) {
+		r.errorHandler = h
+	}
+}
+
+// WithEncoder registers an additional response encoder.
+func WithEncoder(enc Encoder) RouterOption {
+	return func(r *Router) {
+		r.encoders = append(r.encoders, enc)
+	}
+}
+
+// WithDecoder registers an additional request body decoder.
+func WithDecoder(dec Decoder) RouterOption {
+	return func(r *Router) {
+		r.decoders = append(r.decoders, dec)
+	}
+}
+
+// WithWebhook registers a webhook path item for the OpenAPI spec.
+func WithWebhook(name string, item PathItem) RouterOption {
+	return func(r *Router) {
+		if r.webhooks == nil {
+			r.webhooks = make(map[string]PathItem)
+		}
+		r.webhooks[name] = item
+	}
+}
+
+// SpanStarter is a tracing hook interface for creating spans per request.
+// Implement this with your preferred tracing backend (e.g., OpenTelemetry).
+type SpanStarter interface {
+	StartSpan(ctx context.Context, name string, attrs map[string]string) (context.Context, func())
+}
+
+// WithTracer sets a tracing hook for the router.
+func WithTracer(s SpanStarter) RouterOption {
+	return func(r *Router) {
+		r.tracer = s
 	}
 }
 

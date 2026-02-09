@@ -4,6 +4,12 @@
     "title": "Sample API",
     "version": "1.0.0"
   },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Local development"
+    }
+  ],
   "paths": {
     "/v1/events": {
       "get": {
@@ -13,6 +19,7 @@
           "v1",
           "streaming"
         ],
+        "operationId": "getV1Events",
         "responses": {
           "200": {
             "description": "Successful response",
@@ -23,8 +30,29 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
-        }
+        },
+        "security": []
       }
     },
     "/v1/health": {
@@ -35,27 +63,40 @@
           "v1",
           "ops"
         ],
+        "operationId": "healthCheck",
         "responses": {
           "200": {
             "description": "Successful response",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "status": {
-                      "type": "string"
-                    },
-                    "time": {
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  }
+                  "$ref": "#/components/schemas/HealthResp"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             }
           }
-        }
+        },
+        "security": []
       }
     },
     "/v1/legacy": {
@@ -65,18 +106,34 @@
           "v1",
           "ops"
         ],
+        "operationId": "getV1Legacy",
         "responses": {
           "200": {
             "description": "Successful response",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "message": {
-                      "type": "string"
-                    }
-                  }
+                  "$ref": "#/components/schemas/LegacyResp"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             }
@@ -93,6 +150,7 @@
           "v1",
           "users"
         ],
+        "operationId": "getV1Users",
         "parameters": [
           {
             "name": "role",
@@ -107,7 +165,10 @@
             "in": "query",
             "description": "Max results",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": "50"
             }
           },
           {
@@ -115,7 +176,9 @@
             "in": "query",
             "description": "Pagination offset",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 0,
+              "default": "0"
             }
           }
         ],
@@ -125,36 +188,27 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "total": {
-                      "type": "integer"
-                    },
-                    "users": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "created_at": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "email": {
-                            "type": "string"
-                          },
-                          "id": {
-                            "type": "string"
-                          },
-                          "name": {
-                            "type": "string"
-                          },
-                          "role": {
-                            "type": "string"
-                          }
-                        }
-                      }
-                    }
-                  }
+                  "$ref": "#/components/schemas/ListUsersResp"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             }
@@ -167,6 +221,7 @@
           "v1",
           "users"
         ],
+        "operationId": "postV1Users",
         "requestBody": {
           "required": true,
           "content": {
@@ -176,15 +231,25 @@
                 "properties": {
                   "email": {
                     "type": "string",
-                    "description": "Email address"
+                    "description": "Email address",
+                    "example": "alice@example.com"
                   },
                   "name": {
                     "type": "string",
-                    "description": "Display name"
+                    "description": "Display name",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "example": "Alice"
                   },
                   "role": {
                     "type": "string",
-                    "description": "User role (admin, member)"
+                    "description": "User role (admin, member)",
+                    "enum": [
+                      "admin",
+                      "member",
+                      "viewer"
+                    ],
+                    "default": "member"
                   }
                 },
                 "required": [
@@ -201,25 +266,43 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "created_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "email": {
-                      "type": "string"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "role": {
-                      "type": "string"
-                    }
-                  }
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            },
+            "links": {
+              "GetUser": {
+                "operationId": "getV1UsersByById",
+                "description": "Fetch the newly created user"
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             }
@@ -234,6 +317,7 @@
           "v1",
           "users"
         ],
+        "operationId": "deleteV1UsersById",
         "parameters": [
           {
             "name": "id",
@@ -248,6 +332,36 @@
         "responses": {
           "204": {
             "description": "No content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       },
@@ -257,6 +371,7 @@
           "v1",
           "users"
         ],
+        "operationId": "getV1UsersById",
         "parameters": [
           {
             "name": "id",
@@ -274,25 +389,37 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "created_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "email": {
-                      "type": "string"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "role": {
-                      "type": "string"
-                    }
-                  }
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             }
@@ -305,6 +432,7 @@
           "v1",
           "users"
         ],
+        "operationId": "putV1UsersById",
         "parameters": [
           {
             "name": "id",
@@ -346,25 +474,37 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "created_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "email": {
-                      "type": "string"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "role": {
-                      "type": "string"
-                    }
-                  }
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             }
@@ -381,6 +521,7 @@
           "users",
           "files"
         ],
+        "operationId": "getV1UsersByIdAvatar",
         "parameters": [
           {
             "name": "id",
@@ -398,6 +539,36 @@
             "content": {
               "application/octet-stream": {}
             }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       },
@@ -409,6 +580,7 @@
           "users",
           "files"
         ],
+        "operationId": "postV1UsersByIdAvatar",
         "parameters": [
           {
             "name": "id",
@@ -423,6 +595,36 @@
         "responses": {
           "204": {
             "description": "No content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -435,12 +637,183 @@
           "v1",
           "streaming"
         ],
+        "operationId": "getV1Ws",
         "responses": {
           "101": {
             "description": "No content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
     }
-  }
+  },
+  "components": {
+    "schemas": {
+      "HealthResp": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "LegacyResp": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "ListUsersResp": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer"
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/User"
+            }
+          }
+        }
+      },
+      "ProblemDetail": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "string",
+            "description": "Explanation specific to this occurrence"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "field",
+                "message"
+              ]
+            },
+            "description": "Field-level validation errors"
+          },
+          "instance": {
+            "type": "string",
+            "description": "URI reference to the specific occurrence"
+          },
+          "status": {
+            "type": "integer",
+            "description": "HTTP status code"
+          },
+          "title": {
+            "type": "string",
+            "description": "Human-readable summary"
+          },
+          "type": {
+            "type": "string",
+            "description": "URI reference identifying the problem type"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "email": {
+            "type": "string",
+            "pattern": "^[^@]+@[^@]+$"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "member",
+              "viewer"
+            ]
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "description": "JWT bearer token",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "files",
+      "description": "File upload and download"
+    },
+    {
+      "name": "ops",
+      "description": "Operational endpoints"
+    },
+    {
+      "name": "streaming",
+      "description": "Real-time streaming"
+    },
+    {
+      "name": "users",
+      "description": "User management"
+    },
+    {
+      "name": "v1",
+      "description": "Version 1 API"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ]
 }
