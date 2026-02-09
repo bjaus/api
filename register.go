@@ -46,6 +46,11 @@ func register[Req, Resp any](reg Registrar, method, pattern string, h Handler[Re
 
 	ri.handler = buildHandler(h, ri.status, validator, errHandler)
 
+	// Apply per-route body limit.
+	if ri.bodyLimit > 0 {
+		ri.handler = BodyLimit(ri.bodyLimit)(ri.handler)
+	}
+
 	// Apply route-level middleware (from Group).
 	for i := len(routeMW) - 1; i >= 0; i-- {
 		ri.handler = routeMW[i](ri.handler)

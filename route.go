@@ -25,6 +25,8 @@ type routeInfo struct {
 	links      map[string]Link
 	callbacks  map[string]map[string]PathItem
 
+	bodyLimit int64
+
 	reqType  reflect.Type
 	respType reflect.Type
 
@@ -115,6 +117,14 @@ func WithLink(name string, link Link) RouteOption {
 			ri.links = make(map[string]Link)
 		}
 		ri.links[name] = link
+	}
+}
+
+// WithBodyLimit sets a per-route maximum request body size in bytes.
+// This overrides any global BodyLimit middleware for this route.
+func WithBodyLimit(maxBytes int64) RouteOption {
+	return func(ri *routeInfo) {
+		ri.bodyLimit = maxBytes
 	}
 }
 
