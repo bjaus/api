@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 )
 
@@ -14,4 +15,11 @@ func (r *Router) ServeSpec(pattern string) {
 		//nolint:errcheck,gosec // best-effort after WriteHeader
 		json.NewEncoder(w).Encode(spec)
 	})
+}
+
+// WriteSpec writes the OpenAPI spec as indented JSON to w.
+func (r *Router) WriteSpec(w io.Writer) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(r.Spec())
 }
