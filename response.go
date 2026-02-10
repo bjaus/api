@@ -24,15 +24,15 @@ type Redirect struct {
 
 // encodeResponse writes the response to the http.ResponseWriter.
 // It handles Void (204), Redirect, Stream, SSEStream, CookieSetter, HeaderSetter,
-// StatusCoder, and JSON.
-func encodeResponse(w http.ResponseWriter, resp any, defaultStatus int) {
+// StatusCoder, and negotiated encoding.
+func encodeResponse(w http.ResponseWriter, r *http.Request, resp any, defaultStatus int, codecs *codecRegistry) {
 	// Redirect response.
 	if rd, ok := resp.(*Redirect); ok {
 		status := rd.Status
 		if status == 0 {
 			status = http.StatusFound
 		}
-		http.Redirect(w, nil, rd.URL, status)
+		http.Redirect(w, r, rd.URL, status)
 		return
 	}
 
@@ -65,10 +65,13 @@ func encodeResponse(w http.ResponseWriter, resp any, defaultStatus int) {
 		status = sc.StatusCode()
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	// Negotiate response encoder from Accept header.
+	enc, _ := codecs.negotiate(r.Header.Get("Accept"))
+
+	w.Header().Set("Content-Type", enc.ContentType())
 	w.WriteHeader(status)
-	//nolint:errcheck,errchkjson,gosec // best-effort after WriteHeader
-	json.NewEncoder(w).Encode(resp)
+	//nolint:errcheck,gosec // best-effort after WriteHeader
+	enc.Encode(w, resp)
 }
 
 // writeErrorResponse writes an error as an RFC 9457 problem details response.

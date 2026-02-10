@@ -179,12 +179,14 @@ func (r *Router) Spec() OpenAPISpec {
 	reg := newSchemaRegistry()
 	reg.defs[errorSchemaName] = errorResponseSchema()
 
+	codecCTs := r.codecs.contentTypes()
+
 	for i := range r.routes {
 		ri := &r.routes[i]
 		path := toOpenAPIPath(ri.pattern)
 		method := strings.ToLower(ri.method)
 
-		op := buildOperation(ri, reg)
+		op := buildOperation(ri, reg, codecCTs)
 
 		if spec.Paths[path] == nil {
 			spec.Paths[path] = make(PathItem)
@@ -206,7 +208,7 @@ func (r *Router) Spec() OpenAPISpec {
 }
 
 // buildOperation creates an Operation from a routeInfo.
-func buildOperation(ri *routeInfo, reg *schemaRegistry) Operation {
+func buildOperation(ri *routeInfo, reg *schemaRegistry, codecCTs []string) Operation {
 	op := Operation{
 		Summary:     ri.summary,
 		Description: ri.desc,
@@ -235,7 +237,7 @@ func buildOperation(ri *routeInfo, reg *schemaRegistry) Operation {
 	// Build parameters and request body from Req type.
 	if ri.reqType != nil && ri.reqType != reflect.TypeFor[Void]() {
 		op.Parameters = extractParameters(ri.reqType)
-		op.RequestBody = extractRequestBody(ri.reqType, ri.method, reg)
+		op.RequestBody = extractRequestBody(ri.reqType, ri.method, reg, codecCTs)
 	}
 
 	// Build success response.
@@ -271,11 +273,13 @@ func buildOperation(ri *routeInfo, reg *schemaRegistry) Operation {
 
 	default:
 		respSchema := reg.typeToSchema(ri.respType)
+		content := make(map[string]MediaObj, len(codecCTs))
+		for _, ct := range codecCTs {
+			content[ct] = MediaObj{Schema: &respSchema}
+		}
 		op.Responses[statusToString(status)] = ResponseObj{
 			Description: "Successful response",
-			Content: map[string]MediaObj{
-				"application/json": {Schema: &respSchema},
-			},
+			Content:     content,
 		}
 	}
 
@@ -375,7 +379,7 @@ func extractParameters(t reflect.Type) []Parameter {
 }
 
 // extractRequestBody builds an OpenAPI RequestBody if the request type has a body.
-func extractRequestBody(t reflect.Type, method string, reg *schemaRegistry) *RequestBody {
+func extractRequestBody(t reflect.Type, method string, reg *schemaRegistry, codecCTs []string) *RequestBody {
 	// Form-tagged struct → multipart/form-data.
 	if hasFormTags(t) {
 		schema := formFieldsToSchema(t)
@@ -390,22 +394,26 @@ func extractRequestBody(t reflect.Type, method string, reg *schemaRegistry) *Req
 	// Has Body field → body is the Body field's type.
 	if bodyField, ok := t.FieldByName("Body"); ok {
 		schema := reg.typeToSchema(bodyField.Type)
+		content := make(map[string]MediaObj, len(codecCTs))
+		for _, ct := range codecCTs {
+			content[ct] = MediaObj{Schema: &schema}
+		}
 		return &RequestBody{
 			Required: true,
-			Content: map[string]MediaObj{
-				"application/json": {Schema: &schema},
-			},
+			Content:  content,
 		}
 	}
 
 	// No param tags → entire struct is body (only for POST/PUT/PATCH).
 	if !hasParamTags(t) && (method == "POST" || method == "PUT" || method == "PATCH") {
 		schema := reg.typeToSchema(t)
+		content := make(map[string]MediaObj, len(codecCTs))
+		for _, ct := range codecCTs {
+			content[ct] = MediaObj{Schema: &schema}
+		}
 		return &RequestBody{
 			Required: true,
-			Content: map[string]MediaObj{
-				"application/json": {Schema: &schema},
-			},
+			Content:  content,
 		}
 	}
 

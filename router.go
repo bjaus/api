@@ -29,6 +29,7 @@ type Router struct {
 
 	encoders []Encoder
 	decoders []Decoder
+	codecs   *codecRegistry
 
 	tracer SpanStarter
 
@@ -145,6 +146,7 @@ func New(opts ...RouterOption) *Router {
 	for _, opt := range opts {
 		opt(r)
 	}
+	r.codecs = newCodecRegistry(r.encoders, r.decoders)
 	return r
 }
 

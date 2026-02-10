@@ -1,10 +1,8 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -43,7 +41,7 @@ func classifyRequest(t reflect.Type) requestCategory {
 }
 
 // decodeRequest creates a new Req value and populates it from the HTTP request.
-func decodeRequest[Req any](r *http.Request) (*Req, error) {
+func decodeRequest[Req any](r *http.Request, codecs *codecRegistry) (*Req, error) {
 	req := new(Req)
 	t := reflect.TypeFor[Req]()
 	cat := classifyRequest(t)
@@ -60,13 +58,13 @@ func decodeRequest[Req any](r *http.Request) (*Req, error) {
 	// Decode body.
 	switch cat {
 	case catBodyOnly:
-		if err := decodeBody(r, req); err != nil {
+		if err := decodeBody(r, req, codecs); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrBindBody, err)
 		}
 	case catMixed:
 		bodyField := reflect.ValueOf(req).Elem().FieldByName("Body")
 		bodyPtr := bodyField.Addr().Interface()
-		if err := decodeBody(r, bodyPtr); err != nil {
+		if err := decodeBody(r, bodyPtr, codecs); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrBindBody, err)
 		}
 	case catForm:
@@ -273,14 +271,16 @@ func setFieldValue(field reflect.Value, value string) error {
 	return nil
 }
 
-// decodeBody decodes the request body as JSON into target.
-func decodeBody(r *http.Request, target any) error {
+// decodeBody decodes the request body using the codec matched by Content-Type.
+func decodeBody(r *http.Request, target any, codecs *codecRegistry) error {
 	if r.Body == nil || r.ContentLength == 0 {
 		return nil
 	}
-	err := json.NewDecoder(r.Body).Decode(target)
-	if errors.Is(err, io.EOF) {
-		return nil
+
+	dec, ok := codecs.decoderFor(r.Header.Get("Content-Type"))
+	if !ok {
+		return fmt.Errorf("unsupported Content-Type: %s", r.Header.Get("Content-Type"))
 	}
-	return err
+
+	return dec.Decode(r.Body, target)
 }

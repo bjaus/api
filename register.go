@@ -11,12 +11,14 @@ type Registrar interface {
 	addRoute(ri routeInfo)
 	getValidator() Validator
 	getErrorHandler() ErrorHandler
+	getCodecs() *codecRegistry
 	routeMiddleware() []Middleware
 }
 
-func (r *Router) getValidator() Validator     { return r.validator }
+func (r *Router) getValidator() Validator       { return r.validator }
 func (r *Router) getErrorHandler() ErrorHandler { return r.errorHandler }
-func (r *Router) routeMiddleware() []Middleware { return nil }
+func (r *Router) getCodecs() *codecRegistry     { return r.codecs }
+func (r *Router) routeMiddleware() []Middleware  { return nil }
 
 // register is the internal generic registration function.
 func register[Req, Resp any](reg Registrar, method, pattern string, h Handler[Req, Resp], opts ...RouteOption) {
@@ -42,9 +44,10 @@ func register[Req, Resp any](reg Registrar, method, pattern string, h Handler[Re
 
 	validator := reg.getValidator()
 	errHandler := reg.getErrorHandler()
+	codecs := reg.getCodecs()
 	routeMW := reg.routeMiddleware()
 
-	ri.handler = buildHandler(h, ri.status, validator, errHandler)
+	ri.handler = buildHandler(h, ri.status, validator, errHandler, codecs)
 
 	// Apply per-route body limit.
 	if ri.bodyLimit > 0 {
@@ -60,7 +63,7 @@ func register[Req, Resp any](reg Registrar, method, pattern string, h Handler[Re
 }
 
 // buildHandler wraps a typed Handler into an http.Handler.
-func buildHandler[Req, Resp any](h Handler[Req, Resp], defaultStatus int, validator Validator, errHandler ErrorHandler) http.Handler {
+func buildHandler[Req, Resp any](h Handler[Req, Resp], defaultStatus int, validator Validator, errHandler ErrorHandler, codecs *codecRegistry) http.Handler {
 	writeErr := func(w http.ResponseWriter, r *http.Request, err error) {
 		if errHandler != nil {
 			errHandler(w, r, err)
@@ -70,7 +73,15 @@ func buildHandler[Req, Resp any](h Handler[Req, Resp], defaultStatus int, valida
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		req, err := decodeRequest[Req](r)
+		// 406 Not Acceptable: if Accept is explicit and no encoder matches.
+		if accept := r.Header.Get("Accept"); accept != "" {
+			if _, ok := codecs.negotiate(accept); !ok {
+				writeErr(w, r, Error(http.StatusNotAcceptable, "unsupported Accept media type"))
+				return
+			}
+		}
+
+		req, err := decodeRequest[Req](r, codecs)
 		if err != nil {
 			writeErr(w, r, Error(http.StatusBadRequest, err.Error()))
 			return
@@ -110,7 +121,7 @@ func buildHandler[Req, Resp any](h Handler[Req, Resp], defaultStatus int, valida
 			return
 		}
 
-		encodeResponse(w, resp, defaultStatus)
+		encodeResponse(w, r, resp, defaultStatus, codecs)
 	})
 }
 

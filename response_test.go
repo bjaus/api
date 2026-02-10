@@ -97,9 +97,7 @@ func TestResponse_void_returns_204(t *testing.T) {
 func TestResponse_redirect_default_302(t *testing.T) {
 	t.Parallel()
 
-	// Use Recovery middleware to handle the panic from http.Redirect(w, nil, ...).
 	r := api.New()
-	r.Use(api.Recovery())
 	api.Get(r, "/old", func(_ context.Context, _ *api.Void) (*api.Redirect, error) {
 		return &api.Redirect{URL: "/new"}, nil
 	})
@@ -120,16 +118,14 @@ func TestResponse_redirect_default_302(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, resp.Body.Close()) }()
 
-	// The redirect panics due to nil request passed to http.Redirect;
-	// Recovery middleware catches it and returns 500.
-	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	assert.Equal(t, http.StatusFound, resp.StatusCode)
+	assert.Equal(t, "/new", resp.Header.Get("Location"))
 }
 
 func TestResponse_redirect_custom_301(t *testing.T) {
 	t.Parallel()
 
 	r := api.New()
-	r.Use(api.Recovery())
 	api.Get(r, "/moved", func(_ context.Context, _ *api.Redirect) (*api.Redirect, error) {
 		return &api.Redirect{URL: "/permanent", Status: http.StatusMovedPermanently}, nil
 	})
@@ -150,8 +146,8 @@ func TestResponse_redirect_custom_301(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, resp.Body.Close()) }()
 
-	// Recovery catches the panic from nil request in http.Redirect.
-	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	assert.Equal(t, http.StatusMovedPermanently, resp.StatusCode)
+	assert.Equal(t, "/permanent", resp.Header.Get("Location"))
 }
 
 type cookieResp struct {

@@ -57,4 +57,5 @@ func (g *Group) addRoute(ri routeInfo) {
 
 func (g *Group) getValidator() Validator       { return g.router.validator }
 func (g *Group) getErrorHandler() ErrorHandler { return g.router.errorHandler }
-func (g *Group) routeMiddleware() []Middleware { return g.middleware }
+func (g *Group) getCodecs() *codecRegistry     { return g.router.codecs }
+func (g *Group) routeMiddleware() []Middleware  { return g.middleware }
