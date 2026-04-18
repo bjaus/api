@@ -51,6 +51,9 @@ type ValidationError struct {
 	Value   any    `json:"value,omitempty"`
 }
 
+// Error returns the validation error message.
+func (e *ValidationError) Error() string { return e.Message }
+
 // HTTPError is an error with an HTTP status code.
 type HTTPError struct {
 	Status  int    `json:"status"`

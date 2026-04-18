@@ -87,6 +87,12 @@ func buildHandler[Req, Resp any](h Handler[Req, Resp], defaultStatus int, valida
 			return
 		}
 
+		// Run Resolver if implemented.
+		if err := resolveRequest(r.Context(), any(req), r); err != nil {
+			writeErr(w, r, err)
+			return
+		}
+
 		// Run constraint validation on struct tags.
 		if err := validateConstraints(req); err != nil {
 			writeErr(w, r, err)

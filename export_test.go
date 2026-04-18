@@ -21,6 +21,8 @@ var (
 
 	ValidateConstraints = validateConstraints
 	GenerateOperationID = generateOperationID
+
+	ResolveRequest = resolveRequest
 )
 
 // TestSchemaRegistry wraps schemaRegistry for external tests.
