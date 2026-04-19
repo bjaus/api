@@ -66,8 +66,6 @@ func typeToSchema(t reflect.Type) JSONSchema {
 		return JSONSchema{Type: "string", Format: "duration"}
 	case reflect.TypeFor[Void]():
 		return JSONSchema{}
-	case reflect.TypeFor[Stream](), reflect.TypeFor[SSEStream]():
-		return JSONSchema{}
 	case reflect.TypeFor[FileUpload]():
 		return JSONSchema{Type: "string", Format: "binary"}
 	}
@@ -235,8 +233,6 @@ func (r *schemaRegistry) typeToSchema(t reflect.Type) JSONSchema {
 	case reflect.TypeFor[time.Duration]():
 		return JSONSchema{Type: "string", Format: "duration"}
 	case reflect.TypeFor[Void]():
-		return JSONSchema{}
-	case reflect.TypeFor[Stream](), reflect.TypeFor[SSEStream]():
 		return JSONSchema{}
 	case reflect.TypeFor[FileUpload]():
 		return JSONSchema{Type: "string", Format: "binary"}

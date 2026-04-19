@@ -44,14 +44,14 @@ type responseBodyDesc struct {
 }
 
 // bodyKind identifies how the framework emits the value stored in the
-// response struct's Body field.
+// response struct's Body field. When a response type has no Body field,
+// desc.body is nil and no bodyKind is consulted.
 type bodyKind int
 
 const (
-	bodyKindNone    bodyKind = iota // Body field absent — no body emitted
-	bodyKindCodec                   // encode via negotiated codec (JSON/XML/...)
-	bodyKindReader                  // io.Copy raw bytes
-	bodyKindChan                    // emit each channel value as an SSE event
+	bodyKindCodec  bodyKind = iota // encode via negotiated codec (JSON/XML/...)
+	bodyKindReader                 // io.Copy raw bytes
+	bodyKindChan                   // emit each channel value as an SSE event
 )
 
 var (

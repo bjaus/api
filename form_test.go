@@ -31,8 +31,8 @@ func TestForm_string_and_int_fields(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/items", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{Title: req.Title, Count: req.Count}, nil
+	api.Post(r, "/items", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Title: req.Title, Count: req.Count}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -71,8 +71,8 @@ func TestForm_bool_field(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/toggle", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{Active: req.Active}, nil
+	api.Post(r, "/toggle", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Active: req.Active}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -113,7 +113,7 @@ func TestForm_file_upload(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/upload", func(_ context.Context, req *Req) (*Resp, error) {
+	api.Post(r, "/upload", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
 		rc, err := req.File.Open()
 		if err != nil {
 			return nil, err
@@ -123,12 +123,12 @@ func TestForm_file_upload(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		return &Resp{
+		return &api.Resp[Resp]{Body: Resp{
 			Title:    req.Title,
 			Filename: req.File.Filename,
 			Size:     req.File.Size,
 			Content:  string(data),
-		}, nil
+		}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -174,8 +174,8 @@ func TestForm_mixed_path_and_form(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/items/{id}/upload", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{ID: req.ID, Title: req.Title}, nil
+	api.Post(r, "/items/{id}/upload", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{ID: req.ID, Title: req.Title}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -216,12 +216,12 @@ func TestForm_missing_optional_file(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/upload", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{
+	api.Post(r, "/upload", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{
 			Title:    req.Title,
 			HasFile:  req.File.Filename != "",
 			Filename: req.File.Filename,
-		}, nil
+		}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -445,8 +445,8 @@ func TestForm_openapi_multipart_content_type(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/upload", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{OK: true}, nil
+	api.Post(r, "/upload", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{OK: true}}, nil
 	})
 
 	spec := r.Spec()
@@ -549,8 +549,8 @@ func TestForm_openapi_mixed_path_and_form(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/items/{id}/upload", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{OK: true}, nil
+	api.Post(r, "/items/{id}/upload", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{OK: true}}, nil
 	})
 
 	spec := r.Spec()
@@ -584,8 +584,8 @@ func TestForm_float64_field(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/items", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{Price: req.Price}, nil
+	api.Post(r, "/items", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Price: req.Price}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -623,9 +623,9 @@ func TestForm_unexported_fields_skipped(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/items", func(_ context.Context, req *Req) (*Resp, error) {
+	api.Post(r, "/items", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
 		_ = req.hidden // should be zero value
-		return &Resp{Title: req.Title}, nil
+		return &api.Resp[Resp]{Body: Resp{Title: req.Title}}, nil
 	})
 
 	// Runtime binding: unexported field should be skipped.
@@ -668,8 +668,8 @@ func TestForm_empty_form_value_skipped(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/items", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{Title: req.Title, Count: req.Count}, nil
+	api.Post(r, "/items", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Title: req.Title, Count: req.Count}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -713,12 +713,12 @@ func TestForm_multiple_file_upload(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/upload", func(_ context.Context, req *Req) (*Resp, error) {
+	api.Post(r, "/upload", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
 		infos := make([]FileInfo, len(req.Files))
 		for i, f := range req.Files {
 			infos[i] = FileInfo{Name: f.Filename, Size: f.Size}
 		}
-		return &Resp{Count: len(req.Files), Files: infos}, nil
+		return &api.Resp[Resp]{Body: Resp{Count: len(req.Files), Files: infos}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -782,8 +782,8 @@ func TestForm_multiple_file_upload_empty(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/upload", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{Title: req.Title, Count: len(req.Files)}, nil
+	api.Post(r, "/upload", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Title: req.Title, Count: len(req.Files)}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -822,7 +822,7 @@ func TestForm_multiple_file_upload_content(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/upload", func(_ context.Context, req *Req) (*Resp, error) {
+	api.Post(r, "/upload", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
 		contents := make([]string, len(req.Files))
 		for i, f := range req.Files {
 			rc, err := f.Open()
@@ -835,7 +835,7 @@ func TestForm_multiple_file_upload_content(t *testing.T) {
 			}
 			contents[i] = string(data)
 		}
-		return &Resp{Contents: contents}, nil
+		return &api.Resp[Resp]{Body: Resp{Contents: contents}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -884,8 +884,8 @@ func TestForm_multiple_file_upload_openapi(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/upload", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{OK: true}, nil
+	api.Post(r, "/upload", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{OK: true}}, nil
 	})
 
 	spec := r.Spec()

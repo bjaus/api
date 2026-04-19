@@ -58,8 +58,8 @@ func TestMiddleware_ordering(t *testing.T) {
 		})
 	})
 
-	api.Get(r, "/test", func(_ context.Context, _ *api.Void) (*Resp, error) {
-		return &Resp{Value: "ok"}, nil
+	api.Get(r, "/test", func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Value: "ok"}}, nil
 	})
 
 	srv := httptest.NewServer(r)

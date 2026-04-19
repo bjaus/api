@@ -27,11 +27,11 @@ type greetReq struct {
 
 func newGreetRouter() *api.Router {
 	r := api.New()
-	api.Get(r, "/greet", func(_ context.Context, _ *api.Void) (*greetResp, error) {
-		return &greetResp{Message: "hello"}, nil
+	api.Get(r, "/greet", func(_ context.Context, _ *api.Void) (*api.Resp[greetResp], error) {
+		return &api.Resp[greetResp]{Body: greetResp{Message: "hello"}}, nil
 	})
-	api.Post(r, "/greet", func(_ context.Context, req *greetReq) (*greetResp, error) {
-		return &greetResp{Message: "hello " + req.Name}, nil
+	api.Post(r, "/greet", func(_ context.Context, req *greetReq) (*api.Resp[greetResp], error) {
+		return &api.Resp[greetResp]{Body: greetResp{Message: "hello " + req.Name}}, nil
 	})
 	return r
 }
@@ -224,8 +224,8 @@ func TestNegotiate_custom_encoder_via_WithEncoder(t *testing.T) {
 	t.Parallel()
 
 	r := api.New(api.WithEncoder(testEncoder{}))
-	api.Get(r, "/test", func(_ context.Context, _ *api.Void) (*greetResp, error) {
-		return &greetResp{Message: "custom"}, nil
+	api.Get(r, "/test", func(_ context.Context, _ *api.Void) (*api.Resp[greetResp], error) {
+		return &api.Resp[greetResp]{Body: greetResp{Message: "custom"}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -251,8 +251,8 @@ func TestNegotiate_custom_encoder_in_openapi_spec(t *testing.T) {
 	t.Parallel()
 
 	r := api.New(api.WithEncoder(testEncoder{}))
-	api.Get(r, "/test", func(_ context.Context, _ *api.Void) (*greetResp, error) {
-		return &greetResp{Message: "custom"}, nil
+	api.Get(r, "/test", func(_ context.Context, _ *api.Void) (*api.Resp[greetResp], error) {
+		return &api.Resp[greetResp]{Body: greetResp{Message: "custom"}}, nil
 	})
 
 	spec := r.Spec()

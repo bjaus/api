@@ -248,14 +248,6 @@ func TestTypeToSchema_additional_kinds(t *testing.T) {
 		typ    reflect.Type
 		expect api.JSONSchema
 	}{
-		"Stream": {
-			typ:    reflect.TypeFor[api.Stream](),
-			expect: api.JSONSchema{},
-		},
-		"SSEStream": {
-			typ:    reflect.TypeFor[api.SSEStream](),
-			expect: api.JSONSchema{},
-		},
 		"FileUpload": {
 			typ:    reflect.TypeFor[api.FileUpload](),
 			expect: api.JSONSchema{Type: "string", Format: "binary"},
@@ -426,14 +418,6 @@ func TestSchemaRegistry_typeToSchema_well_known_types(t *testing.T) {
 		},
 		"Void": {
 			typ:    reflect.TypeFor[api.Void](),
-			expect: api.JSONSchema{},
-		},
-		"Stream": {
-			typ:    reflect.TypeFor[api.Stream](),
-			expect: api.JSONSchema{},
-		},
-		"SSEStream": {
-			typ:    reflect.TypeFor[api.SSEStream](),
 			expect: api.JSONSchema{},
 		},
 		"FileUpload": {

@@ -36,12 +36,13 @@ func BuildResponseDescriptor(t reflect.Type) (*ResponseDescriptor, error) {
 	return &ResponseDescriptor{desc: d}, nil
 }
 
-// Exported body kind constants for tests.
+// Exported body kind constants for tests. BodyKindNone is a test-only
+// sentinel meaning "no Body field on the response type."
 const (
-	BodyKindNone   = bodyKindNone
-	BodyKindCodec  = bodyKindCodec
-	BodyKindReader = bodyKindReader
-	BodyKindChan   = bodyKindChan
+	BodyKindNone   BodyKind = -1
+	BodyKindCodec           = bodyKindCodec
+	BodyKindReader          = bodyKindReader
+	BodyKindChan            = bodyKindChan
 )
 
 // BodyKind is the exported name for bodyKind in tests.

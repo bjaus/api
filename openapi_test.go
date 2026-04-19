@@ -3,6 +3,7 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -34,12 +35,13 @@ func TestSpec_basic(t *testing.T) {
 
 	r := api.New(api.WithTitle("Items API"), api.WithVersion("2.0.0"))
 
-	api.Get(r, "/items", func(_ context.Context, req *ListReq) (*ListResp, error) {
-		return &ListResp{}, nil
+	api.Get(r, "/items", func(_ context.Context, req *ListReq) (*api.Resp[ListResp], error) {
+		_ = req
+		return &api.Resp[ListResp]{Body: ListResp{}}, nil
 	}, api.WithSummary("List items"), api.WithTags("items"))
 
-	api.Post(r, "/items", func(_ context.Context, req *CreateReq) (*Item, error) {
-		return &Item{ID: "1", Name: req.Body.Name}, nil
+	api.Post(r, "/items", func(_ context.Context, req *CreateReq) (*api.Resp[Item], error) {
+		return &api.Resp[Item]{Body: Item{ID: "1", Name: req.Body.Name}}, nil
 	}, api.WithStatus(http.StatusCreated), api.WithTags("items"))
 
 	api.Delete(r, "/items/{id}", func(_ context.Context, _ *api.Void) (*api.Void, error) {
@@ -156,8 +158,8 @@ func TestSpec_body_only_request(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/users", func(_ context.Context, req *CreateUser) (*User, error) {
-		return &User{ID: "1", Name: req.Name, Email: req.Email}, nil
+	api.Post(r, "/users", func(_ context.Context, req *CreateUser) (*api.Resp[User], error) {
+		return &api.Resp[User]{Body: User{ID: "1", Name: req.Name, Email: req.Email}}, nil
 	})
 
 	spec := r.Spec()
@@ -196,11 +198,11 @@ func TestSpec_components_schemas(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Get(r, "/a", func(_ context.Context, _ *api.Void) (*Resp, error) {
-		return &Resp{}, nil
+	api.Get(r, "/a", func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{}}, nil
 	})
-	api.Get(r, "/b", func(_ context.Context, _ *api.Void) (*Resp, error) {
-		return &Resp{}, nil
+	api.Get(r, "/b", func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{}}, nil
 	})
 
 	spec := r.Spec()
@@ -225,8 +227,8 @@ func TestSpec_error_responses_default(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Get(r, "/ping", func(_ context.Context, _ *api.Void) (*Resp, error) {
-		return &Resp{OK: true}, nil
+	api.Get(r, "/ping", func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{OK: true}}, nil
 	})
 
 	spec := r.Spec()
@@ -255,8 +257,8 @@ func TestSpec_error_responses_path_param(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Get(r, "/things/{id}", func(_ context.Context, _ *Req) (*Resp, error) {
-		return &Resp{}, nil
+	api.Get(r, "/things/{id}", func(_ context.Context, _ *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{}}, nil
 	})
 
 	spec := r.Spec()
@@ -275,8 +277,8 @@ func TestSpec_WithErrors(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/items", func(_ context.Context, _ *api.Void) (*Resp, error) {
-		return &Resp{}, nil
+	api.Post(r, "/items", func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{}}, nil
 	}, api.WithErrors(http.StatusConflict, http.StatusUnprocessableEntity))
 
 	spec := r.Spec()
@@ -296,8 +298,8 @@ func TestSpec_error_responses_dedup(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Get(r, "/items/{id}", func(_ context.Context, _ *api.Void) (*Resp, error) {
-		return &Resp{}, nil
+	api.Get(r, "/items/{id}", func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{}}, nil
 	}, api.WithErrors(http.StatusBadRequest, http.StatusNotFound))
 
 	spec := r.Spec()
@@ -519,8 +521,8 @@ func TestSpec_schema_constraints_appear(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/users", func(_ context.Context, _ *CreateReq) (*Resp, error) {
-		return &Resp{OK: true}, nil
+	api.Post(r, "/users", func(_ context.Context, _ *CreateReq) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{OK: true}}, nil
 	})
 
 	spec := r.Spec()
@@ -677,12 +679,16 @@ func TestSpec_multiple_global_security(t *testing.T) {
 	assert.True(t, has1)
 }
 
+type specStreamResp struct {
+	Body io.Reader
+}
+
 func TestSpec_stream_response(t *testing.T) {
 	t.Parallel()
 
 	r := api.New()
-	api.Get(r, "/download", func(_ context.Context, _ *api.Void) (*api.Stream, error) {
-		return &api.Stream{ContentType: "application/octet-stream"}, nil
+	api.Get(r, "/download", func(_ context.Context, _ *api.Void) (*specStreamResp, error) {
+		return &specStreamResp{}, nil
 	})
 
 	spec := r.Spec()
@@ -692,14 +698,18 @@ func TestSpec_stream_response(t *testing.T) {
 	assert.Contains(t, resp200.Content, "application/octet-stream")
 }
 
+type specSSEResp struct {
+	Body <-chan api.Event
+}
+
 func TestSpec_sse_stream_response(t *testing.T) {
 	t.Parallel()
 
 	r := api.New()
-	api.Get(r, "/events", func(_ context.Context, _ *api.Void) (*api.SSEStream, error) {
-		ch := make(chan api.SSEEvent)
+	api.Get(r, "/events", func(_ context.Context, _ *api.Void) (*specSSEResp, error) {
+		ch := make(chan api.Event)
 		close(ch)
-		return &api.SSEStream{Events: ch}, nil
+		return &specSSEResp{Body: ch}, nil
 	})
 
 	spec := r.Spec()
@@ -752,8 +762,8 @@ func TestSpec_header_and_cookie_params(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Get(r, "/auth", func(_ context.Context, _ *Req) (*Resp, error) {
-		return &Resp{OK: true}, nil
+	api.Get(r, "/auth", func(_ context.Context, _ *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{OK: true}}, nil
 	})
 
 	spec := r.Spec()
@@ -787,8 +797,8 @@ func TestSpec_unexported_field_ignored_in_params(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Get(r, "/search", func(_ context.Context, _ *Req) (*Resp, error) {
-		return &Resp{OK: true}, nil
+	api.Get(r, "/search", func(_ context.Context, _ *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{OK: true}}, nil
 	})
 
 	spec := r.Spec()

@@ -34,6 +34,7 @@ type handlerConfig struct {
 	errBuilder    ValidationErrorBuilder
 	errHandler    ErrorHandler
 	codecs        *codecRegistry
+	responseDesc  *responseDescriptor
 }
 
 // register is the internal generic registration function.
@@ -64,6 +65,16 @@ func register[Req, Resp any](reg Registrar, method, pattern string, h Handler[Re
 		errBuilder = defaultValidationErrorBuilder{}
 	}
 
+	// Void is a special "no response body" marker; it does not carry tags
+	// and does not need descriptor-driven emission.
+	if ri.respType != reflect.TypeFor[Void]() {
+		d, err := buildResponseDescriptor(ri.respType)
+		if err != nil {
+			panic(err)
+		}
+		ri.responseDesc = d
+	}
+
 	cfg := handlerConfig{
 		defaultStatus: ri.status,
 		mode:          ri.mode,
@@ -71,6 +82,7 @@ func register[Req, Resp any](reg Registrar, method, pattern string, h Handler[Re
 		errBuilder:    errBuilder,
 		errHandler:    reg.getErrorHandler(),
 		codecs:        reg.getCodecs(),
+		responseDesc:  ri.responseDesc,
 	}
 
 	ri.handler = buildHandler(h, cfg)
@@ -162,7 +174,7 @@ func buildHandler[Req, Resp any](h Handler[Req, Resp], cfg handlerConfig) http.H
 			return
 		}
 
-		encodeResponse(w, r, resp, cfg.defaultStatus, cfg.codecs)
+		encodeResponse(w, r, resp, cfg.responseDesc, cfg.defaultStatus, cfg.codecs)
 	})
 }
 

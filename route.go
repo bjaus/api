@@ -32,6 +32,8 @@ type routeInfo struct {
 	reqType  reflect.Type
 	respType reflect.Type
 
+	responseDesc *responseDescriptor
+
 	handler http.Handler
 }
 

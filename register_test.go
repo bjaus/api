@@ -21,9 +21,9 @@ func TestRegister_all_methods(t *testing.T) {
 		Method string `json:"method"`
 	}
 
-	handler := func(method string) api.Handler[api.Void, Resp] {
-		return func(_ context.Context, _ *api.Void) (*Resp, error) {
-			return &Resp{Method: method}, nil
+	handler := func(method string) api.Handler[api.Void, api.Resp[Resp]] {
+		return func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
+			return &api.Resp[Resp]{Body: Resp{Method: method}}, nil
 		}
 	}
 
@@ -97,8 +97,8 @@ func TestRegister_WithStatus(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/items", func(_ context.Context, _ *api.Void) (*Resp, error) {
-		return &Resp{ID: "123"}, nil
+	api.Post(r, "/items", func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{ID: "123"}}, nil
 	}, api.WithStatus(http.StatusCreated))
 
 	srv := httptest.NewServer(r)
@@ -175,8 +175,9 @@ func TestBuildHandler_constraint_validation_failure(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/validate", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{OK: true}, nil
+	api.Post(r, "/validate", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		_ = req
+		return &api.Resp[Resp]{Body: Resp{OK: true}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -212,8 +213,8 @@ func TestBuildHandler_global_validator_failure(t *testing.T) {
 	}
 
 	r := api.New(api.WithValidator(failValidator))
-	api.Post(r, "/check", func(_ context.Context, _ *api.Void) (*Resp, error) {
-		return &Resp{OK: true}, nil
+	api.Post(r, "/check", func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{OK: true}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -227,6 +228,19 @@ func TestBuildHandler_global_validator_failure(t *testing.T) {
 	defer func() { require.NoError(t, resp.Body.Close()) }()
 
 	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+}
+
+func TestRegister_panicsOnNonStructResponseType(t *testing.T) {
+	t.Parallel()
+
+	r := api.New()
+
+	assert.Panics(t, func() {
+		api.Get(r, "/bad", func(_ context.Context, _ *api.Void) (*int, error) {
+			n := 0
+			return &n, nil
+		})
+	}, "registering a handler with a non-struct response type must panic")
 }
 
 func TestRaw_on_group_with_middleware(t *testing.T) {

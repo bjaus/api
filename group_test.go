@@ -23,8 +23,8 @@ func TestGroup_prefix(t *testing.T) {
 	r := api.New()
 	v1 := r.Group("/v1")
 
-	api.Get(v1, "/health", func(_ context.Context, _ *api.Void) (*Resp, error) {
-		return &Resp{Version: "v1"}, nil
+	api.Get(v1, "/health", func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Version: "v1"}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -62,8 +62,8 @@ func TestGroup_middleware(t *testing.T) {
 		},
 	))
 
-	api.Get(authed, "/dashboard", func(_ context.Context, _ *api.Void) (*Resp, error) {
-		return &Resp{OK: true}, nil
+	api.Get(authed, "/dashboard", func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{OK: true}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -107,8 +107,8 @@ func TestGroup_nested_prefix(t *testing.T) {
 	api.Get(
 		r.Group("/api").Group("/identity").Group("/admin"),
 		"/users",
-		func(_ context.Context, _ *api.Void) (*Resp, error) {
-			return &Resp{OK: true}, nil
+		func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
+			return &api.Resp[Resp]{Body: Resp{OK: true}}, nil
 		},
 	)
 

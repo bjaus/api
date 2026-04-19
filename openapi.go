@@ -207,6 +207,49 @@ func (r *Router) Spec() OpenAPISpec {
 	return spec
 }
 
+// buildSuccessResponse picks the right ResponseObj for the route's success
+// status based on the response descriptor's body kind.
+func buildSuccessResponse(ri *routeInfo, reg *schemaRegistry, codecCTs []string, status int) (int, ResponseObj) {
+	if ri.respType == nil || ri.respType == reflect.TypeFor[Void]() {
+		if status == 0 || status == http.StatusOK {
+			status = http.StatusNoContent
+		}
+		return status, ResponseObj{Description: "No content"}
+	}
+
+	desc := ri.responseDesc
+
+	if desc != nil && desc.body == nil {
+		return status, ResponseObj{Description: "Successful response"}
+	}
+
+	if desc != nil && desc.body != nil {
+		switch desc.body.kind {
+		case bodyKindReader:
+			return status, ResponseObj{
+				Description: "Successful response",
+				Content:     map[string]MediaObj{"application/octet-stream": {}},
+			}
+		case bodyKindChan:
+			return status, ResponseObj{
+				Description: "Successful response",
+				Content:     map[string]MediaObj{"text/event-stream": {Schema: &JSONSchema{Type: "string"}}},
+			}
+		}
+	}
+
+	bodyType := ri.respType
+	if desc != nil && desc.body != nil {
+		bodyType = desc.body.typ
+	}
+	respSchema := reg.typeToSchema(bodyType)
+	content := make(map[string]MediaObj, len(codecCTs))
+	for _, ct := range codecCTs {
+		content[ct] = MediaObj{Schema: &respSchema}
+	}
+	return status, ResponseObj{Description: "Successful response", Content: content}
+}
+
 // buildOperation creates an Operation from a routeInfo.
 func buildOperation(ri *routeInfo, reg *schemaRegistry, codecCTs []string) Operation {
 	op := Operation{
@@ -246,42 +289,8 @@ func buildOperation(ri *routeInfo, reg *schemaRegistry, codecCTs []string) Opera
 		status = http.StatusOK
 	}
 
-	switch {
-	case ri.respType == nil || ri.respType == reflect.TypeFor[Void]():
-		if status == 0 || status == http.StatusOK {
-			status = http.StatusNoContent
-		}
-		op.Responses[statusToString(status)] = ResponseObj{
-			Description: "No content",
-		}
-
-	case ri.respType == reflect.TypeFor[Stream]():
-		op.Responses[statusToString(status)] = ResponseObj{
-			Description: "Successful response",
-			Content: map[string]MediaObj{
-				"application/octet-stream": {},
-			},
-		}
-
-	case ri.respType == reflect.TypeFor[SSEStream]():
-		op.Responses[statusToString(status)] = ResponseObj{
-			Description: "Successful response",
-			Content: map[string]MediaObj{
-				"text/event-stream": {Schema: &JSONSchema{Type: "string"}},
-			},
-		}
-
-	default:
-		respSchema := reg.typeToSchema(ri.respType)
-		content := make(map[string]MediaObj, len(codecCTs))
-		for _, ct := range codecCTs {
-			content[ct] = MediaObj{Schema: &respSchema}
-		}
-		op.Responses[statusToString(status)] = ResponseObj{
-			Description: "Successful response",
-			Content:     content,
-		}
-	}
+	status, respObj := buildSuccessResponse(ri, reg, codecCTs, status)
+	op.Responses[statusToString(status)] = respObj
 
 	// Build error responses.
 	errorCodes := map[int]struct{}{

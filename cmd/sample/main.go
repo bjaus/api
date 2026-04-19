@@ -32,6 +32,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -509,21 +510,29 @@ func handleUploadAvatar(_ context.Context, req *UploadAvatarReq) (*api.Void, err
 	return &api.Void{}, nil
 }
 
-func handleDownloadAvatar(_ context.Context, req *DownloadAvatarReq) (*api.Stream, error) {
+type AvatarResp struct {
+	Type string `header:"Content-Type"`
+	Body io.Reader
+}
+
+func handleDownloadAvatar(_ context.Context, req *DownloadAvatarReq) (*AvatarResp, error) {
 	data, ok := store.getAvatar(req.ID)
 	if !ok {
 		return nil, api.Errorf(http.StatusNotFound, "avatar not found for user %s", req.ID)
 	}
 
-	return &api.Stream{
-		ContentType: "image/png",
-		Status:      http.StatusOK,
-		Body:        strings.NewReader(string(data)),
+	return &AvatarResp{
+		Type: "image/png",
+		Body: strings.NewReader(string(data)),
 	}, nil
 }
 
-func handleEvents(ctx context.Context, _ *api.Void) (*api.SSEStream, error) {
-	ch := make(chan api.SSEEvent)
+type EventsResp struct {
+	Body <-chan api.Event
+}
+
+func handleEvents(ctx context.Context, _ *api.Void) (*EventsResp, error) {
+	ch := make(chan api.Event)
 
 	go func() {
 		defer close(ch)
@@ -537,19 +546,19 @@ func handleEvents(ctx context.Context, _ *api.Void) (*api.SSEStream, error) {
 				return
 			case t := <-ticker.C:
 				i++
-				ch <- api.SSEEvent{
-					ID:    fmt.Sprintf("%d", i),
-					Event: "tick",
-					Data:  map[string]any{"time": t.Format(time.RFC3339), "seq": i},
+				ch <- api.Event{
+					ID:   fmt.Sprintf("%d", i),
+					Name: "tick",
+					Data: map[string]any{"time": t.Format(time.RFC3339), "seq": i},
 				}
 				if i >= 30 {
-					return // stop after 30 events for the demo
+					return
 				}
 			}
 		}
 	}()
 
-	return &api.SSEStream{Events: ch}, nil
+	return &EventsResp{Body: ch}, nil
 }
 
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {

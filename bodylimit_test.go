@@ -79,13 +79,13 @@ func TestWithBodyLimit(t *testing.T) {
 	r := api.New()
 
 	// Route with a 64-byte body limit.
-	api.Post(r, "/limited", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{Len: len(req.Data)}, nil
+	api.Post(r, "/limited", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Len: len(req.Data)}}, nil
 	}, api.WithBodyLimit(64))
 
 	// Route with no per-route limit.
-	api.Post(r, "/unlimited", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{Len: len(req.Data)}, nil
+	api.Post(r, "/unlimited", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Len: len(req.Data)}}, nil
 	})
 
 	srv := httptest.NewServer(r)

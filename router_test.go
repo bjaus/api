@@ -22,8 +22,8 @@ func TestRouter_ServeHTTP_basic(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Get(r, "/health", func(_ context.Context, _ *api.Void) (*Resp, error) {
-		return &Resp{Message: "ok"}, nil
+	api.Get(r, "/health", func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Message: "ok"}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -58,8 +58,8 @@ func TestRouter_Use_middleware(t *testing.T) {
 		})
 	})
 
-	api.Get(r, "/test", func(_ context.Context, _ *api.Void) (*Resp, error) {
-		return &Resp{Value: "hello"}, nil
+	api.Get(r, "/test", func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Value: "hello"}}, nil
 	})
 
 	srv := httptest.NewServer(r)

@@ -26,8 +26,8 @@ func TestRequest_path_params(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Get(r, "/items/{id}", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{ID: req.ID}, nil
+	api.Get(r, "/items/{id}", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{ID: req.ID}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -58,8 +58,8 @@ func TestRequest_query_params(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Get(r, "/items", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{Page: req.Page, Sort: req.Sort}, nil
+	api.Get(r, "/items", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Page: req.Page, Sort: req.Sort}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -114,8 +114,8 @@ func TestRequest_json_body(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/users", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{Name: req.Name, Email: req.Email}, nil
+	api.Post(r, "/users", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Name: req.Name, Email: req.Email}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -153,8 +153,8 @@ func TestRequest_mixed_params_and_body(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/orgs/{org_id}/users", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{OrgID: req.OrgID, Name: req.Body.Name}, nil
+	api.Post(r, "/orgs/{org_id}/users", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{OrgID: req.OrgID, Name: req.Body.Name}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -190,8 +190,8 @@ func TestRequest_header_binding(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Get(r, "/auth", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{Token: req.Token}, nil
+	api.Get(r, "/auth", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Token: req.Token}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -222,11 +222,11 @@ func TestRequest_RawRequest_embedding(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Get(r, "/raw", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{
+	api.Get(r, "/raw", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{
 			Method: req.Request.Method,
 			Path:   req.Request.URL.Path,
-		}, nil
+		}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -253,8 +253,8 @@ func TestRequest_void_request(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Get(r, "/void", func(_ context.Context, _ *api.Void) (*Resp, error) {
-		return &Resp{Message: "ok"}, nil
+	api.Get(r, "/void", func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Message: "ok"}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -287,8 +287,8 @@ func TestRequest_cookie_binding(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Get(r, "/session", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{Session: req.Session}, nil
+	api.Get(r, "/session", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Session: req.Session}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -318,8 +318,8 @@ func TestRequest_cookie_default(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Get(r, "/session-default", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{Session: req.Session}, nil
+	api.Get(r, "/session-default", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Session: req.Session}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -348,8 +348,8 @@ func TestRequest_header_default(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Get(r, "/header-default", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{Accept: req.Accept}, nil
+	api.Get(r, "/header-default", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Accept: req.Accept}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -385,13 +385,13 @@ func TestRequest_setFieldValue_types(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Get(r, "/types", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{
+	api.Get(r, "/types", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{
 			Duration: req.Duration,
 			Price:    req.Price,
 			Active:   req.Active,
 			Count:    req.Count,
-		}, nil
+		}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -426,8 +426,8 @@ func TestRequest_setFieldValue_duration(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Get(r, "/duration", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{TimeoutNs: int64(req.Timeout)}, nil
+	api.Get(r, "/duration", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{TimeoutNs: int64(req.Timeout)}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -563,8 +563,8 @@ func TestRequest_decodeBody_nil_body(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/nil-body", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{Name: req.Name}, nil
+	api.Post(r, "/nil-body", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Name: req.Name}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -594,8 +594,8 @@ func TestRequest_decodeBody_empty_body(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/empty-body", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{Name: req.Name}, nil
+	api.Post(r, "/empty-body", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Name: req.Name}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -681,8 +681,8 @@ func TestRequest_params_only_no_body(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Get(r, "/items/{id}", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{ID: req.ID, Lang: req.Lang}, nil
+	api.Get(r, "/items/{id}", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{ID: req.ID, Lang: req.Lang}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -714,8 +714,8 @@ func TestRequest_body_only_nil_body(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/nilbody", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{Name: req.Name}, nil
+	api.Post(r, "/nilbody", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Name: req.Name}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -747,8 +747,8 @@ func TestRequest_mixed_body_nil(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/mixed-nil/{id}", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{ID: req.ID, Name: req.Body.Name}, nil
+	api.Post(r, "/mixed-nil/{id}", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{ID: req.ID, Name: req.Body.Name}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -857,8 +857,8 @@ func TestRequest_body_only_with_nil_http_body(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/nilhttpbody", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{Name: req.Name}, nil
+	api.Post(r, "/nilhttpbody", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Name: req.Name}}, nil
 	})
 
 	// Directly call ServeHTTP with a request that has nil Body but non-zero ContentLength.
@@ -885,8 +885,8 @@ func TestRequest_bindParams_skips_unexported(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Get(r, "/unexported/{id}", func(_ context.Context, req *reqWithUnexported) (*Resp, error) {
-		return &Resp{ID: req.ID}, nil
+	api.Get(r, "/unexported/{id}", func(_ context.Context, req *reqWithUnexported) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{ID: req.ID}}, nil
 	})
 
 	srv := httptest.NewServer(r)
@@ -917,8 +917,8 @@ func TestRequest_decodeBody_eof_body(t *testing.T) {
 	}
 
 	r := api.New()
-	api.Post(r, "/eof-body", func(_ context.Context, req *Req) (*Resp, error) {
-		return &Resp{Name: req.Name}, nil
+	api.Post(r, "/eof-body", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Name: req.Name}}, nil
 	})
 
 	// Create a request with an empty body but non-zero ContentLength to hit the EOF path.
