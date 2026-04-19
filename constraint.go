@@ -2,15 +2,16 @@ package api
 
 import (
 	"fmt"
-	"net/http"
 	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
 )
 
-// validateConstraints checks all constraint tags on the struct fields and returns
-// a ProblemDetail with all violations if any are found.
+// validateConstraints checks all constraint tags on the struct fields and
+// returns a ValidationErrors slice containing every violation, or nil if
+// the input is valid. The caller is responsible for routing the result
+// through the router's ValidationErrorBuilder.
 func validateConstraints(v any) error {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() == reflect.Pointer {
@@ -24,13 +25,7 @@ func validateConstraints(v any) error {
 	collectConstraintErrors(rv, "", &errs)
 
 	if len(errs) > 0 {
-		return &ProblemDetail{
-			Type:   "about:blank",
-			Title:  "Validation Failed",
-			Status: http.StatusBadRequest,
-			Detail: fmt.Sprintf("%d constraint violation(s)", len(errs)),
-			Errors: errs,
-		}
+		return ValidationErrors(errs)
 	}
 
 	return nil

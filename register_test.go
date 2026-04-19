@@ -200,9 +200,7 @@ func TestBuildHandler_constraint_validation_failure(t *testing.T) {
 	assert.Equal(t, "body.name", body.Errors[0].Field)
 }
 
-type failValidator struct{}
-
-func (f *failValidator) Validate(_ any) error {
+func failValidator(_ any) error {
 	return api.Error(http.StatusUnprocessableEntity, "global validator rejected")
 }
 
@@ -213,7 +211,7 @@ func TestBuildHandler_global_validator_failure(t *testing.T) {
 		OK bool `json:"ok"`
 	}
 
-	r := api.New(api.WithValidator(&failValidator{}))
+	r := api.New(api.WithValidator(failValidator))
 	api.Post(r, "/check", func(_ context.Context, _ *api.Void) (*Resp, error) {
 		return &Resp{OK: true}, nil
 	})

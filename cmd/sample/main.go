@@ -82,7 +82,7 @@ func newRouter() *api.Router {
 	r := api.New(
 		api.WithTitle("Sample API"),
 		api.WithVersion("1.0.0"),
-		api.WithValidator(&bodyLengthValidator{maxBytes: 1 << 20}),
+		api.WithValidator((&bodyLengthValidator{maxBytes: 1 << 20}).Validate),
 
 		// Phase A: OpenAPI enhancements.
 		api.WithServers(
@@ -370,7 +370,7 @@ type CreateUserReq struct {
 	}
 }
 
-func (r *CreateUserReq) Validate() error {
+func (r *CreateUserReq) Validate(_ context.Context) error {
 	if strings.TrimSpace(r.Body.Name) == "" {
 		return api.Error(http.StatusBadRequest, "name is required")
 	}

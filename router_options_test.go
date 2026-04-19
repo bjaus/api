@@ -126,14 +126,10 @@ func TestListenAndServe_port_in_use(t *testing.T) {
 	assert.Contains(t, err.Error(), "bind")
 }
 
-type mockValidator struct{}
-
-func (m *mockValidator) Validate(_ any) error { return nil }
-
 func TestWithValidator(t *testing.T) {
 	t.Parallel()
 
-	r := api.New(api.WithValidator(&mockValidator{}))
+	r := api.New(api.WithValidator(func(_ any) error { return nil }))
 	assert.NotNil(t, r)
 }
 

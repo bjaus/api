@@ -41,12 +41,11 @@ func TestValidateConstraints_minLength(t *testing.T) {
 			err := api.ValidateConstraints(tc.input)
 			if tc.wantErr {
 				require.Error(t, err)
-				var pd *api.ProblemDetail
-				require.True(t, errors.As(err, &pd))
-				assert.Equal(t, "Validation Failed", pd.Title)
-				assert.Len(t, pd.Errors, 1)
-				assert.Equal(t, "name", pd.Errors[0].Field)
-				assert.Contains(t, pd.Errors[0].Message, "at least 3 characters")
+				var ve api.ValidationErrors
+				require.True(t, errors.As(err, &ve))
+				assert.Len(t, ve, 1)
+				assert.Equal(t, "name", ve[0].Field)
+				assert.Contains(t, ve[0].Message, "at least 3 characters")
 			} else {
 				require.NoError(t, err)
 			}
@@ -85,11 +84,11 @@ func TestValidateConstraints_maxLength(t *testing.T) {
 			err := api.ValidateConstraints(tc.input)
 			if tc.wantErr {
 				require.Error(t, err)
-				var pd *api.ProblemDetail
-				require.True(t, errors.As(err, &pd))
-				assert.Len(t, pd.Errors, 1)
-				assert.Equal(t, "name", pd.Errors[0].Field)
-				assert.Contains(t, pd.Errors[0].Message, "at most 5 characters")
+				var ve api.ValidationErrors
+				require.True(t, errors.As(err, &ve))
+				assert.Len(t, ve, 1)
+				assert.Equal(t, "name", ve[0].Field)
+				assert.Contains(t, ve[0].Message, "at most 5 characters")
 			} else {
 				require.NoError(t, err)
 			}
@@ -128,11 +127,11 @@ func TestValidateConstraints_minimum(t *testing.T) {
 			err := api.ValidateConstraints(tc.input)
 			if tc.wantErr {
 				require.Error(t, err)
-				var pd *api.ProblemDetail
-				require.True(t, errors.As(err, &pd))
-				assert.Len(t, pd.Errors, 1)
-				assert.Equal(t, "age", pd.Errors[0].Field)
-				assert.Contains(t, pd.Errors[0].Message, "at least 18")
+				var ve api.ValidationErrors
+				require.True(t, errors.As(err, &ve))
+				assert.Len(t, ve, 1)
+				assert.Equal(t, "age", ve[0].Field)
+				assert.Contains(t, ve[0].Message, "at least 18")
 			} else {
 				require.NoError(t, err)
 			}
@@ -171,11 +170,11 @@ func TestValidateConstraints_maximum(t *testing.T) {
 			err := api.ValidateConstraints(tc.input)
 			if tc.wantErr {
 				require.Error(t, err)
-				var pd *api.ProblemDetail
-				require.True(t, errors.As(err, &pd))
-				assert.Len(t, pd.Errors, 1)
-				assert.Equal(t, "score", pd.Errors[0].Field)
-				assert.Contains(t, pd.Errors[0].Message, "at most 100")
+				var ve api.ValidationErrors
+				require.True(t, errors.As(err, &ve))
+				assert.Len(t, ve, 1)
+				assert.Equal(t, "score", ve[0].Field)
+				assert.Contains(t, ve[0].Message, "at most 100")
 			} else {
 				require.NoError(t, err)
 			}
@@ -210,11 +209,11 @@ func TestValidateConstraints_pattern(t *testing.T) {
 			err := api.ValidateConstraints(tc.input)
 			if tc.wantErr {
 				require.Error(t, err)
-				var pd *api.ProblemDetail
-				require.True(t, errors.As(err, &pd))
-				assert.Len(t, pd.Errors, 1)
-				assert.Equal(t, "email", pd.Errors[0].Field)
-				assert.Contains(t, pd.Errors[0].Message, "must match pattern")
+				var ve api.ValidationErrors
+				require.True(t, errors.As(err, &ve))
+				assert.Len(t, ve, 1)
+				assert.Equal(t, "email", ve[0].Field)
+				assert.Contains(t, ve[0].Message, "must match pattern")
 			} else {
 				require.NoError(t, err)
 			}
@@ -253,11 +252,11 @@ func TestValidateConstraints_enum(t *testing.T) {
 			err := api.ValidateConstraints(tc.input)
 			if tc.wantErr {
 				require.Error(t, err)
-				var pd *api.ProblemDetail
-				require.True(t, errors.As(err, &pd))
-				assert.Len(t, pd.Errors, 1)
-				assert.Equal(t, "status", pd.Errors[0].Field)
-				assert.Contains(t, pd.Errors[0].Message, "must be one of")
+				var ve api.ValidationErrors
+				require.True(t, errors.As(err, &ve))
+				assert.Len(t, ve, 1)
+				assert.Equal(t, "status", ve[0].Field)
+				assert.Contains(t, ve[0].Message, "must be one of")
 			} else {
 				require.NoError(t, err)
 			}
@@ -296,11 +295,11 @@ func TestValidateConstraints_minItems(t *testing.T) {
 			err := api.ValidateConstraints(tc.input)
 			if tc.wantErr {
 				require.Error(t, err)
-				var pd *api.ProblemDetail
-				require.True(t, errors.As(err, &pd))
-				assert.Len(t, pd.Errors, 1)
-				assert.Equal(t, "tags", pd.Errors[0].Field)
-				assert.Contains(t, pd.Errors[0].Message, "at least 2 items")
+				var ve api.ValidationErrors
+				require.True(t, errors.As(err, &ve))
+				assert.Len(t, ve, 1)
+				assert.Equal(t, "tags", ve[0].Field)
+				assert.Contains(t, ve[0].Message, "at least 2 items")
 			} else {
 				require.NoError(t, err)
 			}
@@ -339,11 +338,11 @@ func TestValidateConstraints_maxItems(t *testing.T) {
 			err := api.ValidateConstraints(tc.input)
 			if tc.wantErr {
 				require.Error(t, err)
-				var pd *api.ProblemDetail
-				require.True(t, errors.As(err, &pd))
-				assert.Len(t, pd.Errors, 1)
-				assert.Equal(t, "tags", pd.Errors[0].Field)
-				assert.Contains(t, pd.Errors[0].Message, "at most 3 items")
+				var ve api.ValidationErrors
+				require.True(t, errors.As(err, &ve))
+				assert.Len(t, ve, 1)
+				assert.Equal(t, "tags", ve[0].Field)
+				assert.Contains(t, ve[0].Message, "at most 3 items")
 			} else {
 				require.NoError(t, err)
 			}
@@ -371,13 +370,12 @@ func TestValidateConstraints_exhaustive_collects_all(t *testing.T) {
 	err := api.ValidateConstraints(input)
 	require.Error(t, err)
 
-	var pd *api.ProblemDetail
-	require.True(t, errors.As(err, &pd))
-	assert.Len(t, pd.Errors, 4)
-	assert.Contains(t, pd.Detail, "4 constraint violation(s)")
+	var ve api.ValidationErrors
+	require.True(t, errors.As(err, &ve))
+	assert.Len(t, ve, 4)
 
 	fields := make(map[string]bool)
-	for _, e := range pd.Errors {
+	for _, e := range ve {
 		fields[e.Field] = true
 	}
 	assert.True(t, fields["name"])
@@ -427,10 +425,10 @@ func TestValidateConstraints_pointer_to_struct(t *testing.T) {
 	err := api.ValidateConstraints(input)
 	require.Error(t, err)
 
-	var pd *api.ProblemDetail
-	require.True(t, errors.As(err, &pd))
-	assert.Len(t, pd.Errors, 1)
-	assert.Equal(t, "name", pd.Errors[0].Field)
+	var ve api.ValidationErrors
+	require.True(t, errors.As(err, &ve))
+	assert.Len(t, ve, 1)
+	assert.Equal(t, "name", ve[0].Field)
 }
 
 func TestValidateConstraints_uint_minimum(t *testing.T) {
@@ -544,9 +542,9 @@ func TestValidateConstraints_nested_struct(t *testing.T) {
 			err := api.ValidateConstraints(tc.input)
 			if tc.wantErr {
 				require.Error(t, err)
-				var pd *api.ProblemDetail
-				require.True(t, errors.As(err, &pd))
-				assert.Equal(t, "address.city", pd.Errors[0].Field)
+				var ve api.ValidationErrors
+				require.True(t, errors.As(err, &ve))
+				assert.Equal(t, "address.city", ve[0].Field)
 			} else {
 				require.NoError(t, err)
 			}
@@ -570,9 +568,9 @@ func TestValidateConstraints_body_field_recursion(t *testing.T) {
 	err := api.ValidateConstraints(input)
 	require.Error(t, err)
 
-	var pd *api.ProblemDetail
-	require.True(t, errors.As(err, &pd))
-	assert.Equal(t, "body.name", pd.Errors[0].Field)
+	var ve api.ValidationErrors
+	require.True(t, errors.As(err, &ve))
+	assert.Equal(t, "body.name", ve[0].Field)
 }
 
 func TestValidateConstraints_json_dash_skipped(t *testing.T) {

@@ -84,9 +84,11 @@ func (g *Group) addRoute(ri routeInfo) {
 	g.parent.addRoute(ri)
 }
 
-func (g *Group) getValidator() Validator       { return g.parent.getValidator() }
-func (g *Group) getErrorHandler() ErrorHandler { return g.parent.getErrorHandler() }
-func (g *Group) getCodecs() *codecRegistry     { return g.parent.getCodecs() }
+func (g *Group) getValidator() ValidatorFunc             { return g.parent.getValidator() }
+func (g *Group) getErrorHandler() ErrorHandler           { return g.parent.getErrorHandler() }
+func (g *Group) getErrorBuilder() ValidationErrorBuilder { return g.parent.getErrorBuilder() }
+func (g *Group) getMode() ValidationMode                 { return g.parent.getMode() }
+func (g *Group) getCodecs() *codecRegistry               { return g.parent.getCodecs() }
 
 // routeMiddleware returns the combined middleware stack: parent's (unless
 // reset) followed by this group's. The parent's middleware wraps the child's,

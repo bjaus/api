@@ -27,10 +27,19 @@ type routeInfo struct {
 
 	bodyLimit int64
 
+	mode ValidationMode
+
 	reqType  reflect.Type
 	respType reflect.Type
 
 	handler http.Handler
+}
+
+// WithMode overrides the router's ValidationMode for this route.
+func WithMode(m ValidationMode) RouteOption {
+	return func(ri *routeInfo) {
+		ri.mode = m
+	}
 }
 
 // RouteOption configures a route at registration time.

@@ -24,7 +24,9 @@ type Router struct {
 
 	webhooks map[string]PathItem
 
-	validator    Validator
+	validator    ValidatorFunc
+	mode         ValidationMode
+	errBuilder   ValidationErrorBuilder
 	errorHandler ErrorHandler
 
 	encoders []Encoder
@@ -53,10 +55,30 @@ func WithVersion(version string) RouterOption {
 	}
 }
 
-// WithValidator sets a global request validator.
-func WithValidator(v Validator) RouterOption {
+// WithValidator sets a router-level request validator. Typically used to plug
+// in a reflection-based library; see ValidatorFunc.
+func WithValidator(v ValidatorFunc) RouterOption {
 	return func(r *Router) {
 		r.validator = v
+	}
+}
+
+// WithValidationMode sets the router-wide default for when constraint-tag
+// enforcement runs relative to the per-type Validator and ValidatorFunc.
+// Default is ValidateConstraintsLast.
+func WithValidationMode(m ValidationMode) RouterOption {
+	return func(r *Router) {
+		r.mode = m
+	}
+}
+
+// WithValidationErrorBuilder installs a custom builder for ValidationErrors.
+// Any layer that returns api.ValidationErrors has its errors routed through
+// the builder before reaching the ErrorHandler. If unset, the framework uses
+// a default builder that produces an RFC 9457 *ProblemDetail.
+func WithValidationErrorBuilder(b ValidationErrorBuilder) RouterOption {
+	return func(r *Router) {
+		r.errBuilder = b
 	}
 }
 
