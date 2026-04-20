@@ -23,7 +23,7 @@ type validatedReq struct {
 
 func (r *validatedReq) Validate(_ context.Context) error {
 	if r.Body.Name == "" {
-		return api.Error(http.StatusBadRequest, "name required")
+		return api.Error(api.CodeBadRequest, api.WithMessage("name required"))
 	}
 	return nil
 }
@@ -147,7 +147,7 @@ type nonValidationErrReq struct {
 }
 
 func (r *nonValidationErrReq) Validate(_ context.Context) error {
-	return api.Error(http.StatusUnauthorized, "login required")
+	return api.Error(api.CodeUnauthorized, api.WithMessage("login required"))
 }
 
 func TestValidator_nonValidationErrorForwarded(t *testing.T) {

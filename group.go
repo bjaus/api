@@ -10,43 +10,52 @@ type Group struct {
 	tags            []string
 	security        []string
 	resetMiddleware bool
+	errorOpts       []ErrorOption
 }
 
-// GroupOption configures a Group.
-type GroupOption func(*Group)
+// GroupOption configures a Group at construction time. Implement this
+// interface (or use the GroupOptionFunc adapter) to define custom options.
+type GroupOption interface {
+	applyGroup(*Group)
+}
+
+// GroupOptionFunc is a function adapter that satisfies GroupOption.
+type GroupOptionFunc func(*Group)
+
+func (f GroupOptionFunc) applyGroup(g *Group) { f(g) }
 
 // WithGroupTags adds default tags to all routes registered on the group.
 func WithGroupTags(tags ...string) GroupOption {
-	return func(g *Group) {
+	return GroupOptionFunc(func(g *Group) {
 		g.tags = append(g.tags, tags...)
-	}
+	})
 }
 
 // WithGroupMiddleware adds middleware to the group. For nested groups, the
 // child's middleware is appended to the parent's unless WithGroupMiddlewareReset
 // is also supplied.
 func WithGroupMiddleware(mw ...Middleware) GroupOption {
-	return func(g *Group) {
+	return GroupOptionFunc(func(g *Group) {
 		g.middleware = append(g.middleware, mw...)
-	}
+	})
 }
 
 // WithGroupMiddlewareReset causes a nested group to ignore its parent's
 // middleware stack and start with an isolated one. The group's own middleware
 // (added via WithGroupMiddleware) still applies.
 func WithGroupMiddlewareReset() GroupOption {
-	return func(g *Group) {
+	return GroupOptionFunc(func(g *Group) {
 		g.resetMiddleware = true
-	}
+	})
 }
 
 // WithGroupSecurity sets security requirements for all routes in the group.
 // For nested groups, the child's security replaces the parent's; absence
 // inherits the parent's security.
 func WithGroupSecurity(schemes ...string) GroupOption {
-	return func(g *Group) {
+	return GroupOptionFunc(func(g *Group) {
 		g.security = append(g.security, schemes...)
-	}
+	})
 }
 
 // Group creates a new route group with the given prefix and options.
@@ -67,7 +76,7 @@ func newGroup(parent Registrar, prefix string, opts ...GroupOption) *Group {
 		prefix: prefix,
 	}
 	for _, opt := range opts {
-		opt(g)
+		opt.applyGroup(g)
 	}
 	return g
 }
@@ -89,6 +98,17 @@ func (g *Group) getErrorHandler() ErrorHandler           { return g.parent.getEr
 func (g *Group) getErrorBuilder() ValidationErrorBuilder { return g.parent.getErrorBuilder() }
 func (g *Group) getMode() ValidationMode                 { return g.parent.getMode() }
 func (g *Group) getCodecs() *codecRegistry               { return g.parent.getCodecs() }
+
+// errorOptionChain returns the parent's chain followed by this group's
+// own error options. Outer scopes come first so later scopes can
+// override scalars and accumulate lists.
+func (g *Group) errorOptionChain() []ErrorOption {
+	parent := g.parent.errorOptionChain()
+	out := make([]ErrorOption, 0, len(parent)+len(g.errorOpts))
+	out = append(out, parent...)
+	out = append(out, g.errorOpts...)
+	return out
+}
 
 // routeMiddleware returns the combined middleware stack: parent's (unless
 // reset) followed by this group's. The parent's middleware wraps the child's,

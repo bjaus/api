@@ -28,7 +28,7 @@ func TestRouteOptions_applied_via_registration(t *testing.T) {
 		api.WithDescription("Fetches a single item by ID"),
 		api.WithTags("items", "read"),
 		api.WithDeprecated(),
-		api.WithErrors(http.StatusNotFound, http.StatusConflict),
+		api.WithError(api.WithErrors(api.CodeNotFound, api.CodeConflict)),
 		api.WithOperationID("getItemById"),
 		api.WithExtension("x-custom", "value"),
 	)

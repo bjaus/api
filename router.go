@@ -28,6 +28,7 @@ type Router struct {
 	mode         ValidationMode
 	errBuilder   ValidationErrorBuilder
 	errorHandler ErrorHandler
+	errorOpts    []ErrorOption
 
 	encoders []Encoder
 	decoders []Decoder
@@ -38,38 +39,48 @@ type Router struct {
 	mu sync.Mutex
 }
 
-// RouterOption configures a Router.
-type RouterOption func(*Router)
+// RouterOption configures a Router at construction time. Implement this
+// interface (or use the RouterOptionFunc adapter) to define custom
+// options.
+type RouterOption interface {
+	applyRouter(*Router)
+}
+
+// RouterOptionFunc is a function adapter that satisfies RouterOption.
+// Most WithXxx constructors in this package return a RouterOptionFunc.
+type RouterOptionFunc func(*Router)
+
+func (f RouterOptionFunc) applyRouter(r *Router) { f(r) }
 
 // WithTitle sets the API title (used in OpenAPI spec).
 func WithTitle(title string) RouterOption {
-	return func(r *Router) {
+	return RouterOptionFunc(func(r *Router) {
 		r.title = title
-	}
+	})
 }
 
 // WithVersion sets the API version (used in OpenAPI spec).
 func WithVersion(version string) RouterOption {
-	return func(r *Router) {
+	return RouterOptionFunc(func(r *Router) {
 		r.version = version
-	}
+	})
 }
 
 // WithValidator sets a router-level request validator. Typically used to plug
 // in a reflection-based library; see ValidatorFunc.
 func WithValidator(v ValidatorFunc) RouterOption {
-	return func(r *Router) {
+	return RouterOptionFunc(func(r *Router) {
 		r.validator = v
-	}
+	})
 }
 
 // WithValidationMode sets the router-wide default for when constraint-tag
 // enforcement runs relative to the per-type Validator and ValidatorFunc.
 // Default is ValidateConstraintsLast.
 func WithValidationMode(m ValidationMode) RouterOption {
-	return func(r *Router) {
+	return RouterOptionFunc(func(r *Router) {
 		r.mode = m
-	}
+	})
 }
 
 // WithValidationErrorBuilder installs a custom builder for ValidationErrors.
@@ -77,40 +88,40 @@ func WithValidationMode(m ValidationMode) RouterOption {
 // the builder before reaching the ErrorHandler. If unset, the framework uses
 // a default builder that produces an RFC 9457 *ProblemDetail.
 func WithValidationErrorBuilder(b ValidationErrorBuilder) RouterOption {
-	return func(r *Router) {
+	return RouterOptionFunc(func(r *Router) {
 		r.errBuilder = b
-	}
+	})
 }
 
 // WithServers sets the OpenAPI servers array.
 func WithServers(servers ...Server) RouterOption {
-	return func(r *Router) {
+	return RouterOptionFunc(func(r *Router) {
 		r.servers = servers
-	}
+	})
 }
 
 // WithSecurityScheme registers a named security scheme for the OpenAPI spec.
 func WithSecurityScheme(name string, scheme SecurityScheme) RouterOption {
-	return func(r *Router) {
+	return RouterOptionFunc(func(r *Router) {
 		if r.securitySchemes == nil {
 			r.securitySchemes = make(map[string]SecurityScheme)
 		}
 		r.securitySchemes[name] = scheme
-	}
+	})
 }
 
 // WithGlobalSecurity sets global security requirements by scheme name.
 func WithGlobalSecurity(schemes ...string) RouterOption {
-	return func(r *Router) {
+	return RouterOptionFunc(func(r *Router) {
 		r.security = append(r.security, schemes...)
-	}
+	})
 }
 
 // WithTagDescriptions sets tag descriptions for the OpenAPI spec.
 func WithTagDescriptions(descs map[string]string) RouterOption {
-	return func(r *Router) {
+	return RouterOptionFunc(func(r *Router) {
 		r.tagDescs = descs
-	}
+	})
 }
 
 // ErrorHandler is a custom error response writer.
@@ -118,33 +129,33 @@ type ErrorHandler func(w http.ResponseWriter, r *http.Request, err error)
 
 // WithErrorHandler sets a custom error handler for the router.
 func WithErrorHandler(h ErrorHandler) RouterOption {
-	return func(r *Router) {
+	return RouterOptionFunc(func(r *Router) {
 		r.errorHandler = h
-	}
+	})
 }
 
 // WithEncoder registers an additional response encoder.
 func WithEncoder(enc Encoder) RouterOption {
-	return func(r *Router) {
+	return RouterOptionFunc(func(r *Router) {
 		r.encoders = append(r.encoders, enc)
-	}
+	})
 }
 
 // WithDecoder registers an additional request body decoder.
 func WithDecoder(dec Decoder) RouterOption {
-	return func(r *Router) {
+	return RouterOptionFunc(func(r *Router) {
 		r.decoders = append(r.decoders, dec)
-	}
+	})
 }
 
 // WithWebhook registers a webhook path item for the OpenAPI spec.
 func WithWebhook(name string, item PathItem) RouterOption {
-	return func(r *Router) {
+	return RouterOptionFunc(func(r *Router) {
 		if r.webhooks == nil {
 			r.webhooks = make(map[string]PathItem)
 		}
 		r.webhooks[name] = item
-	}
+	})
 }
 
 // SpanStarter is a tracing hook interface for creating spans per request.
@@ -155,9 +166,9 @@ type SpanStarter interface {
 
 // WithTracer sets a tracing hook for the router.
 func WithTracer(s SpanStarter) RouterOption {
-	return func(r *Router) {
+	return RouterOptionFunc(func(r *Router) {
 		r.tracer = s
-	}
+	})
 }
 
 // New creates a new Router with the given options.
@@ -166,7 +177,7 @@ func New(opts ...RouterOption) *Router {
 		mux: http.NewServeMux(),
 	}
 	for _, opt := range opts {
-		opt(r)
+		opt.applyRouter(r)
 	}
 	r.codecs = newCodecRegistry(r.encoders, r.decoders)
 	return r

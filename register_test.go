@@ -202,7 +202,7 @@ func TestBuildHandler_constraint_validation_failure(t *testing.T) {
 }
 
 func failValidator(_ any) error {
-	return api.Error(http.StatusUnprocessableEntity, "global validator rejected")
+	return api.Error(api.CodeUnprocessableContent, api.WithMessage("global validator rejected"))
 }
 
 func TestBuildHandler_global_validator_failure(t *testing.T) {

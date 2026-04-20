@@ -219,14 +219,14 @@ func TestSpec_components_schemas(t *testing.T) {
 	assert.Equal(t, "#/components/schemas/Resp", bSchema.Ref)
 }
 
-func TestSpec_error_responses_default(t *testing.T) {
+func TestSpec_error_responses_default_noBody(t *testing.T) {
 	t.Parallel()
 
 	type Resp struct {
 		OK bool `json:"ok"`
 	}
 
-	r := api.New()
+	r := api.New() // no WithErrorBody — spec should describe no content
 	api.Get(r, "/ping", func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
 		return &api.Resp[Resp]{Body: Resp{OK: true}}, nil
 	})
@@ -241,9 +241,51 @@ func TestSpec_error_responses_default(t *testing.T) {
 	// No path param → no 404.
 	assert.NotContains(t, op.Responses, "404")
 
-	// Error responses reference ProblemDetail schema.
-	assert.Equal(t, "#/components/schemas/ProblemDetail", op.Responses["400"].Content["application/json"].Schema.Ref)
-	assert.Equal(t, "#/components/schemas/ProblemDetail", op.Responses["500"].Content["application/json"].Schema.Ref)
+	// No WithErrorBody configured → error responses have no content.
+	assert.Empty(t, op.Responses["400"].Content, "without WithErrorBody, error responses should have no content")
+	assert.Empty(t, op.Responses["500"].Content)
+}
+
+func TestSpec_error_responses_envelope(t *testing.T) {
+	t.Parallel()
+
+	type Resp struct {
+		OK bool `json:"ok"`
+	}
+
+	r := api.New(api.WithError(api.WithErrorBody(api.ErrorBodyEnvelope)))
+	api.Get(r, "/ping", func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{OK: true}}, nil
+	})
+
+	spec := r.Spec()
+	op := spec.Paths["/ping"]["get"]
+
+	// Envelope-configured errors reference the Envelope schema.
+	assert.Equal(t, "#/components/schemas/Envelope", op.Responses["400"].Content["application/json"].Schema.Ref)
+	assert.Equal(t, "#/components/schemas/Envelope", op.Responses["500"].Content["application/json"].Schema.Ref)
+
+	require.NotNil(t, spec.Components)
+	assert.Contains(t, spec.Components.Schemas, "Envelope")
+}
+
+func TestSpec_error_responses_text(t *testing.T) {
+	t.Parallel()
+
+	type Resp struct {
+		OK bool `json:"ok"`
+	}
+
+	r := api.New(api.WithError(api.WithErrorBody(api.ErrorBodyText)))
+	api.Get(r, "/ping", func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{OK: true}}, nil
+	})
+
+	spec := r.Spec()
+	op := spec.Paths["/ping"]["get"]
+
+	assert.Contains(t, op.Responses["400"].Content, "text/plain")
+	assert.Equal(t, "string", op.Responses["400"].Content["text/plain"].Schema.Type)
 }
 
 func TestSpec_error_responses_path_param(t *testing.T) {
@@ -279,7 +321,7 @@ func TestSpec_WithErrors(t *testing.T) {
 	r := api.New()
 	api.Post(r, "/items", func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
 		return &api.Resp[Resp]{Body: Resp{}}, nil
-	}, api.WithErrors(http.StatusConflict, http.StatusUnprocessableEntity))
+	}, api.WithError(api.WithErrors(api.CodeConflict, api.CodeUnprocessableContent)))
 
 	spec := r.Spec()
 	op := spec.Paths["/items"]["post"]
@@ -300,7 +342,7 @@ func TestSpec_error_responses_dedup(t *testing.T) {
 	r := api.New()
 	api.Get(r, "/items/{id}", func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
 		return &api.Resp[Resp]{Body: Resp{}}, nil
-	}, api.WithErrors(http.StatusBadRequest, http.StatusNotFound))
+	}, api.WithError(api.WithErrors(api.CodeBadRequest, api.CodeNotFound)))
 
 	spec := r.Spec()
 	op := spec.Paths["/items/{id}"]["get"]
@@ -311,25 +353,23 @@ func TestSpec_error_responses_dedup(t *testing.T) {
 	assert.Contains(t, op.Responses, "500")
 }
 
-func TestSpec_ProblemDetail_schema(t *testing.T) {
+func TestSpec_Envelope_schema(t *testing.T) {
 	t.Parallel()
 
-	r := api.New()
+	r := api.New(api.WithError(api.WithErrorBody(api.ErrorBodyEnvelope)))
 	api.Get(r, "/health", func(_ context.Context, _ *api.Void) (*api.Void, error) {
 		return &api.Void{}, nil
 	})
 
 	spec := r.Spec()
 	require.NotNil(t, spec.Components)
-	require.Contains(t, spec.Components.Schemas, "ProblemDetail")
+	require.Contains(t, spec.Components.Schemas, "Envelope")
 
-	errSchema := spec.Components.Schemas["ProblemDetail"]
-	assert.Equal(t, "object", errSchema.Type)
-	assert.Contains(t, errSchema.Properties, "status")
-	assert.Contains(t, errSchema.Properties, "title")
-	assert.Contains(t, errSchema.Properties, "detail")
-	assert.Contains(t, errSchema.Properties, "errors")
-	assert.Equal(t, []string{"status"}, errSchema.Required)
+	envSchema := spec.Components.Schemas["Envelope"]
+	assert.Equal(t, "object", envSchema.Type)
+	assert.Contains(t, envSchema.Properties, "code")
+	assert.Contains(t, envSchema.Properties, "message")
+	assert.Contains(t, envSchema.Properties, "details")
 }
 
 func TestSpec_WithServers(t *testing.T) {

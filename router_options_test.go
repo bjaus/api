@@ -25,7 +25,7 @@ func TestWithErrorHandler(t *testing.T) {
 	}))
 
 	api.Get(r, "/fail", func(_ context.Context, _ *api.Void) (*api.Void, error) {
-		return nil, api.Error(http.StatusTeapot, "I'm a teapot")
+		return nil, api.Error(api.CodeTeapot, api.WithMessage("I'm a teapot"))
 	})
 
 	srv := httptest.NewServer(r)

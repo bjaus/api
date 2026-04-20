@@ -177,7 +177,6 @@ func (r *Router) Spec() OpenAPISpec {
 	}
 
 	reg := newSchemaRegistry()
-	reg.defs[errorSchemaName] = errorResponseSchema()
 
 	codecCTs := r.codecs.contentTypes()
 
@@ -205,6 +204,33 @@ func (r *Router) Spec() OpenAPISpec {
 	}
 
 	return spec
+}
+
+// errorResponseContent computes the content map used for every error
+// response on the route. It inspects the route's resolved error template
+// and dispatches based on the body mapper's return type:
+//
+//   - No body mapper configured → nil (spec emits a status-only response).
+//   - Mapper returns *string → text/plain.
+//   - Mapper returns a struct type → negotiated codec, schema registered.
+func errorResponseContent(ri *routeInfo, reg *schemaRegistry, codecCTs []string) map[string]MediaObj {
+	if ri.errorTemplate == nil || ri.errorTemplate.body == nil {
+		return nil
+	}
+
+	elemType := ri.errorTemplate.body.elemType()
+	if elemType.Kind() == reflect.String {
+		return map[string]MediaObj{
+			"text/plain": {Schema: &JSONSchema{Type: "string"}},
+		}
+	}
+
+	schema := reg.typeToSchema(elemType)
+	content := make(map[string]MediaObj, len(codecCTs))
+	for _, ct := range codecCTs {
+		content[ct] = MediaObj{Schema: &schema}
+	}
+	return content
 }
 
 // buildSuccessResponse picks the right ResponseObj for the route's success
@@ -292,7 +318,9 @@ func buildOperation(ri *routeInfo, reg *schemaRegistry, codecCTs []string) Opera
 	status, respObj := buildSuccessResponse(ri, reg, codecCTs, status)
 	op.Responses[statusToString(status)] = respObj
 
-	// Build error responses.
+	// Build error responses. The code set is the automatic baseline plus
+	// any codes declared via WithError(WithErrors(...)) collected at
+	// scope-resolution time and stored on ri.errorCodes.
 	errorCodes := map[int]struct{}{
 		http.StatusBadRequest:          {},
 		http.StatusInternalServerError: {},
@@ -300,17 +328,15 @@ func buildOperation(ri *routeInfo, reg *schemaRegistry, codecCTs []string) Opera
 	if strings.Contains(ri.pattern, "{") {
 		errorCodes[http.StatusNotFound] = struct{}{}
 	}
-	for _, code := range ri.errors {
-		errorCodes[code] = struct{}{}
+	for _, c := range ri.errorCodes {
+		errorCodes[c.HTTPStatus()] = struct{}{}
 	}
 
-	errRef := JSONSchema{Ref: "#/components/schemas/" + errorSchemaName}
+	errContent := errorResponseContent(ri, reg, codecCTs)
 	for code := range errorCodes {
 		op.Responses[statusToString(code)] = ResponseObj{
 			Description: http.StatusText(code),
-			Content: map[string]MediaObj{
-				"application/json": {Schema: &errRef},
-			},
+			Content:     errContent,
 		}
 	}
 

@@ -277,12 +277,12 @@ func TestResponse_empty_string_header_not_emitted(t *testing.T) {
 	assert.Empty(t, resp.Header.Values("X-Another"), "empty string header must not be emitted")
 }
 
-func TestResponse_error_returns_problem_detail(t *testing.T) {
+func TestResponse_defaultError_statusOnly(t *testing.T) {
 	t.Parallel()
 
-	r := api.New()
+	r := api.New() // no WithErrorBody configured — default is no body
 	api.Get(r, "/fail", func(_ context.Context, _ *api.Void) (*api.Void, error) {
-		return nil, api.Error(http.StatusUnprocessableEntity, "bad data")
+		return nil, api.Error(api.CodeUnprocessableContent, api.WithMessage("bad data"))
 	})
 
 	srv := httptest.NewServer(r)
@@ -296,13 +296,61 @@ func TestResponse_error_returns_problem_detail(t *testing.T) {
 	defer func() { require.NoError(t, resp.Body.Close()) }()
 
 	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
-	assert.Equal(t, "application/problem+json", resp.Header.Get("Content-Type"))
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Empty(t, body, "default: no WithErrorBody means no body emitted")
+}
 
-	var body api.ProblemDetail
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
-	assert.Equal(t, http.StatusUnprocessableEntity, body.Status)
-	assert.Equal(t, "bad data", body.Detail)
-	assert.Equal(t, "about:blank", body.Type)
+func TestResponse_errorBodyEnvelope(t *testing.T) {
+	t.Parallel()
+
+	r := api.New(api.WithError(api.WithErrorBody(api.ErrorBodyEnvelope)))
+	api.Get(r, "/fail", func(_ context.Context, _ *api.Void) (*api.Void, error) {
+		return nil, api.Error(api.CodeUnprocessableContent, api.WithMessage("bad data"))
+	})
+
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/fail", nil)
+	require.NoError(t, err)
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+
+	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+
+	var env api.Envelope
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&env))
+	assert.Equal(t, api.CodeUnprocessableContent, env.Code)
+	assert.Equal(t, "bad data", env.Message)
+}
+
+func TestResponse_errorBodyText(t *testing.T) {
+	t.Parallel()
+
+	r := api.New(api.WithError(api.WithErrorBody(api.ErrorBodyText)))
+	api.Get(r, "/fail", func(_ context.Context, _ *api.Void) (*api.Void, error) {
+		return nil, api.Error(api.CodeUnprocessableContent, api.WithMessage("bad data"))
+	})
+
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/fail", nil)
+	require.NoError(t, err)
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+
+	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+	assert.Equal(t, "text/plain; charset=utf-8", resp.Header.Get("Content-Type"))
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, "bad data", string(body))
 }
 
 func TestResponse_ProblemDetail_error_used_directly(t *testing.T) {
@@ -344,10 +392,12 @@ func TestResponse_ProblemDetail_error_used_directly(t *testing.T) {
 	assert.Equal(t, "name", body.Errors[0].Field)
 }
 
-func TestResponse_generic_error_returns_500(t *testing.T) {
+func TestResponse_genericError_wrappedAsInternal(t *testing.T) {
 	t.Parallel()
 
-	r := api.New()
+	// With ErrorBodyEnvelope configured, a plain errors.New is wrapped
+	// into CodeInternal and rendered with the framework envelope.
+	r := api.New(api.WithError(api.WithErrorBody(api.ErrorBodyEnvelope)))
 	api.Get(r, "/boom", func(_ context.Context, _ *api.Void) (*api.Void, error) {
 		return nil, errors.New("something broke")
 	})
@@ -363,13 +413,11 @@ func TestResponse_generic_error_returns_500(t *testing.T) {
 	defer func() { require.NoError(t, resp.Body.Close()) }()
 
 	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
-	assert.Equal(t, "application/problem+json", resp.Header.Get("Content-Type"))
 
-	var body api.ProblemDetail
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
-	assert.Equal(t, "about:blank", body.Type)
-	assert.Equal(t, http.StatusInternalServerError, body.Status)
-	assert.Equal(t, "something broke", body.Detail)
+	var env api.Envelope
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&env))
+	assert.Equal(t, api.CodeInternal, env.Code)
+	assert.Equal(t, "something broke", env.Message)
 }
 
 // --- Body kind: io.Reader (streaming) ---

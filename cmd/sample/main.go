@@ -145,7 +145,7 @@ func newRouter() *api.Router {
 		api.WithStatus(http.StatusCreated),
 		api.WithSummary("Create user"),
 		api.WithTags("users"),
-		api.WithErrors(http.StatusConflict),
+		api.WithError(api.WithErrors(api.CodeConflict)),
 		api.WithLink("GetUser", api.Link{
 			OperationID: "getV1UsersByById",
 			Description: "Fetch the newly created user",
@@ -373,13 +373,13 @@ type CreateUserReq struct {
 
 func (r *CreateUserReq) Validate(_ context.Context) error {
 	if strings.TrimSpace(r.Body.Name) == "" {
-		return api.Error(http.StatusBadRequest, "name is required")
+		return api.Error(api.CodeBadRequest, api.WithMessage("name is required"))
 	}
 	if strings.TrimSpace(r.Body.Email) == "" {
-		return api.Error(http.StatusBadRequest, "email is required")
+		return api.Error(api.CodeBadRequest, api.WithMessage("email is required"))
 	}
 	if !strings.Contains(r.Body.Email, "@") {
-		return api.Error(http.StatusBadRequest, "email must contain @")
+		return api.Error(api.CodeBadRequest, api.WithMessage("email must contain @"))
 	}
 	return nil
 }
@@ -461,7 +461,7 @@ func handleCreateUser(_ context.Context, req *CreateUserReq) (*User, error) {
 func handleGetUser(_ context.Context, req *UserByIDReq) (*User, error) {
 	user, ok := store.get(req.ID)
 	if !ok {
-		return nil, api.Errorf(http.StatusNotFound, "user %s not found", req.ID)
+		return nil, api.Error(api.CodeNotFound, api.WithMessagef("user %s not found", req.ID))
 	}
 	return user, nil
 }
@@ -469,31 +469,31 @@ func handleGetUser(_ context.Context, req *UserByIDReq) (*User, error) {
 func handleUpdateUser(_ context.Context, req *UpdateUserReq) (*User, error) {
 	user, ok := store.update(req.ID, req.Body.Name, req.Body.Email, req.Body.Role)
 	if !ok {
-		return nil, api.Errorf(http.StatusNotFound, "user %s not found", req.ID)
+		return nil, api.Error(api.CodeNotFound, api.WithMessagef("user %s not found", req.ID))
 	}
 	return user, nil
 }
 
 func handleDeleteUser(_ context.Context, req *UserByIDReq) (*api.Void, error) {
 	if !store.delete(req.ID) {
-		return nil, api.Errorf(http.StatusNotFound, "user %s not found", req.ID)
+		return nil, api.Error(api.CodeNotFound, api.WithMessagef("user %s not found", req.ID))
 	}
 	return &api.Void{}, nil
 }
 
 func handleUploadAvatar(_ context.Context, req *UploadAvatarReq) (*api.Void, error) {
 	if _, ok := store.get(req.ID); !ok {
-		return nil, api.Errorf(http.StatusNotFound, "user %s not found", req.ID)
+		return nil, api.Error(api.CodeNotFound, api.WithMessagef("user %s not found", req.ID))
 	}
 
 	upload, err := api.ParseFileUpload(req.Request, "avatar")
 	if err != nil {
-		return nil, api.Errorf(http.StatusBadRequest, "missing avatar file: %v", err)
+		return nil, api.Error(api.CodeBadRequest, api.WithMessagef("missing avatar file: %v", err))
 	}
 
 	rc, err := upload.Open()
 	if err != nil {
-		return nil, api.Errorf(http.StatusInternalServerError, "failed to read upload: %v", err)
+		return nil, api.Error(api.CodeInternal, api.WithMessagef("failed to read upload: %v", err))
 	}
 	defer func() {
 		//nolint:errcheck,gosec // best-effort close
@@ -503,7 +503,7 @@ func handleUploadAvatar(_ context.Context, req *UploadAvatarReq) (*api.Void, err
 	buf := make([]byte, upload.Size)
 	n, err := rc.Read(buf)
 	if err != nil && n == 0 {
-		return nil, api.Errorf(http.StatusInternalServerError, "failed to read upload: %v", err)
+		return nil, api.Error(api.CodeInternal, api.WithMessagef("failed to read upload: %v", err))
 	}
 
 	store.setAvatar(req.ID, buf[:n])
@@ -518,7 +518,7 @@ type AvatarResp struct {
 func handleDownloadAvatar(_ context.Context, req *DownloadAvatarReq) (*AvatarResp, error) {
 	data, ok := store.getAvatar(req.ID)
 	if !ok {
-		return nil, api.Errorf(http.StatusNotFound, "avatar not found for user %s", req.ID)
+		return nil, api.Error(api.CodeNotFound, api.WithMessagef("avatar not found for user %s", req.ID))
 	}
 
 	return &AvatarResp{
@@ -589,7 +589,7 @@ func (v *bodyLengthValidator) Validate(req any) error {
 	if rr, ok := req.(withRaw); ok {
 		r := rr.GetRequest()
 		if r != nil && r.ContentLength > v.maxBytes {
-			return api.Errorf(http.StatusRequestEntityTooLarge, "body too large: %d > %d", r.ContentLength, v.maxBytes)
+			return api.Error(api.CodeContentTooLarge, api.WithMessagef("body too large: %d > %d", r.ContentLength, v.maxBytes))
 		}
 	}
 	return nil

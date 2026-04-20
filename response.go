@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"reflect"
@@ -191,33 +190,116 @@ func headerFieldValues(fv reflect.Value) []string {
 	return nil
 }
 
-// writeErrorResponse writes an error as an RFC 9457 problem details response.
-func writeErrorResponse(w http.ResponseWriter, err error) {
-	status := ErrorStatus(err)
+// writeProblemDetail writes a *ProblemDetail as an RFC 9457 problem
+// details response. Called only from the validation path.
+func writeProblemDetail(w http.ResponseWriter, pd *ProblemDetail) {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(pd.Status)
+	//nolint:errcheck,errchkjson,gosec // best-effort after WriteHeader
+	json.NewEncoder(w).Encode(pd)
+}
 
-	// If the error is already a ProblemDetail, use it directly.
-	var pd *ProblemDetail
-	if ok := isProblemDetail(err, &pd); ok {
-		w.Header().Set("Content-Type", "application/problem+json")
-		w.WriteHeader(pd.Status)
-		//nolint:errcheck,errchkjson,gosec // best-effort after WriteHeader
-		json.NewEncoder(w).Encode(pd)
+// mergeErr combines a route's scope-level error template with the
+// inline state carried by the handler-returned *Err. Scalar options
+// (message, body mapper, cause) from the inline state replace the
+// template; map options (headers, cookies keyed by name) replace
+// entries with the same key; list options (details) accumulate with
+// template entries first.
+func mergeErr(template, inline *Err) *Err {
+	final := &Err{code: inline.code}
+
+	if inline.message != "" {
+		final.message = inline.message
+	} else if template != nil {
+		final.message = template.message
+	}
+
+	if inline.body != nil {
+		final.body = inline.body
+	} else if template != nil {
+		final.body = template.body
+	}
+
+	if inline.cause != nil {
+		final.cause = inline.cause
+	} else if template != nil {
+		final.cause = template.cause
+	}
+
+	if template != nil {
+		for name, values := range template.headers {
+			if final.headers == nil {
+				final.headers = http.Header{}
+			}
+			final.headers[name] = append([]string{}, values...)
+		}
+		for name, c := range template.cookies {
+			if final.cookies == nil {
+				final.cookies = make(map[string]Cookie, len(template.cookies))
+			}
+			final.cookies[name] = c
+		}
+		final.details = append(final.details, template.details...)
+	}
+
+	for name, values := range inline.headers {
+		if final.headers == nil {
+			final.headers = http.Header{}
+		}
+		final.headers[name] = append([]string{}, values...)
+	}
+	for name, c := range inline.cookies {
+		if final.cookies == nil {
+			final.cookies = make(map[string]Cookie)
+		}
+		final.cookies[name] = c
+	}
+	final.details = append(final.details, inline.details...)
+
+	return final
+}
+
+// emitErr renders a fully-resolved *Err to the response writer. Status
+// comes from the Code. Cookies and headers are written first, then body
+// (if any) is emitted via the configured mapper.
+func emitErr(w http.ResponseWriter, r *http.Request, e *Err, codecs *codecRegistry) {
+	status := e.code.HTTPStatus()
+
+	for name, c := range e.cookies {
+		http.SetCookie(w, c.ToHTTPCookie(name))
+	}
+	for name, values := range e.headers {
+		for _, v := range values {
+			w.Header().Add(name, v)
+		}
+	}
+
+	// HTTP: 1xx, 204, 304 carry no body.
+	if isNoBodyStatus(status) || e.body == nil {
+		w.WriteHeader(status)
 		return
 	}
 
-	problem := &ProblemDetail{
-		Type:   "about:blank",
-		Title:  http.StatusText(status),
-		Status: status,
-		Detail: err.Error(),
+	rv, skip := e.body.produce(e)
+	if skip {
+		w.WriteHeader(status)
+		return
 	}
 
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(status)
-	//nolint:errcheck,errchkjson,gosec // best-effort after WriteHeader
-	json.NewEncoder(w).Encode(problem)
-}
+	// Dispatch by the mapper's element type. *string → text/plain;
+	// everything else → negotiated codec.
+	if e.body.elemType().Kind() == reflect.String {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(status)
+		s, _ := rv.Elem().Interface().(string) //nolint:errcheck // kind guarantees string
+		//nolint:errcheck,gosec // best-effort after WriteHeader
+		io.WriteString(w, s)
+		return
+	}
 
-func isProblemDetail(err error, target **ProblemDetail) bool {
-	return errors.As(err, target)
+	enc, _ := codecs.negotiate(r.Header.Get("Accept"))
+	w.Header().Set("Content-Type", enc.ContentType())
+	w.WriteHeader(status)
+	//nolint:errcheck,gosec // best-effort after WriteHeader
+	enc.Encode(w, rv.Interface())
 }

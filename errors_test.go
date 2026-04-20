@@ -60,10 +60,10 @@ func TestProblemDetail_StatusCode(t *testing.T) {
 	}
 }
 
-func TestHTTPError_Error(t *testing.T) {
+func TestErr_Error(t *testing.T) {
 	t.Parallel()
 
-	err := api.Error(http.StatusNotFound, "not found")
+	err := api.Error(api.CodeNotFound, api.WithMessage("not found"))
 	assert.EqualError(t, err, "not found")
 
 	var sc api.StatusCoder
@@ -71,37 +71,65 @@ func TestHTTPError_Error(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, sc.StatusCode())
 }
 
-func TestHTTPError_StatusCode(t *testing.T) {
+func TestErr_Error_fallsBackToStatusText(t *testing.T) {
 	t.Parallel()
 
-	err := api.Error(http.StatusConflict, "conflict")
+	err := api.Error(api.CodeNotFound)
+	assert.EqualError(t, err, http.StatusText(http.StatusNotFound), "no message → status text")
+}
 
-	var apiErr *api.HTTPError
+func TestErr_Code(t *testing.T) {
+	t.Parallel()
+
+	err := api.Error(api.CodeConflict, api.WithMessage("conflict"))
+
+	var apiErr *api.Err
 	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, http.StatusConflict, apiErr.Status)
-	assert.Equal(t, "conflict", apiErr.Message)
+	assert.Equal(t, api.CodeConflict, apiErr.Code())
+	assert.Equal(t, http.StatusConflict, apiErr.StatusCode())
+	assert.Equal(t, "conflict", apiErr.Message())
 }
 
-func TestError_constructor(t *testing.T) {
+func TestErr_Details(t *testing.T) {
 	t.Parallel()
 
-	err := api.Error(http.StatusForbidden, "forbidden")
+	type fieldErr struct {
+		Field   string `json:"field"`
+		Message string `json:"message"`
+	}
 
-	var he *api.HTTPError
-	require.ErrorAs(t, err, &he)
-	assert.Equal(t, http.StatusForbidden, he.StatusCode())
-	assert.Equal(t, "forbidden", he.Error())
+	err := api.Error(api.CodeBadRequest,
+		api.WithDetail(fieldErr{Field: "email", Message: "required"}),
+		api.WithDetail(fieldErr{Field: "name", Message: "too short"}),
+	)
+
+	var apiErr *api.Err
+	require.ErrorAs(t, err, &apiErr)
+	require.Len(t, apiErr.Details(), 2)
 }
 
-func TestErrorf_constructor(t *testing.T) {
+func TestErr_WithMessagef(t *testing.T) {
 	t.Parallel()
 
-	err := api.Errorf(http.StatusBadRequest, "invalid %s: %d", "age", 42)
+	err := api.Error(api.CodeBadRequest, api.WithMessagef("invalid %s: %d", "age", 42))
 	assert.EqualError(t, err, "invalid age: 42")
+}
 
-	var he *api.HTTPError
-	require.ErrorAs(t, err, &he)
-	assert.Equal(t, http.StatusBadRequest, he.StatusCode())
+func TestErr_WithCause(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("underlying")
+	err := api.Error(api.CodeInternal, api.WithCause(cause), api.WithMessage("wrapped"))
+
+	assert.EqualError(t, err, "wrapped")
+	assert.ErrorIs(t, err, cause)
+}
+
+func TestValidationError_Error(t *testing.T) {
+	t.Parallel()
+
+	ve := &api.ValidationError{Field: "email", Message: "required"}
+	assert.EqualError(t, ve, "required")
 }
 
 func TestErrorStatus(t *testing.T) {
@@ -111,8 +139,8 @@ func TestErrorStatus(t *testing.T) {
 		err    error
 		expect int
 	}{
-		"with StatusCoder": {
-			err:    api.Error(http.StatusForbidden, "forbidden"),
+		"with *Err StatusCoder": {
+			err:    api.Error(api.CodeForbidden, api.WithMessage("forbidden")),
 			expect: http.StatusForbidden,
 		},
 		"with ProblemDetail StatusCoder": {

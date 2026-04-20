@@ -2,7 +2,6 @@ package api
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 )
 
@@ -16,12 +15,14 @@ var (
 	ErrBindForm   = errors.New("bind form")
 )
 
-// StatusCoder is implemented by errors or responses that carry an HTTP status code.
+// StatusCoder is implemented by errors that carry an HTTP status code.
+// The framework's own *Err implements it via Code.HTTPStatus().
 type StatusCoder interface {
 	StatusCode() int
 }
 
-// ProblemDetail is an RFC 9457 problem details response.
+// ProblemDetail is an RFC 9457 problem details response, used as the body
+// shape returned by the built-in ValidationErrorBuilder.
 //
 //nolint:errname // RFC 9457 standard name
 type ProblemDetail struct {
@@ -54,30 +55,9 @@ type ValidationError struct {
 // Error returns the validation error message.
 func (e *ValidationError) Error() string { return e.Message }
 
-// HTTPError is an error with an HTTP status code.
-type HTTPError struct {
-	Status  int    `json:"status"`
-	Message string `json:"message"`
-}
-
-// Error returns the error message.
-func (e *HTTPError) Error() string { return e.Message }
-
-// StatusCode returns the HTTP status code.
-func (e *HTTPError) StatusCode() int { return e.Status }
-
-// Error returns an error with the given HTTP status code and message.
-func Error(status int, message string) error {
-	return &HTTPError{Status: status, Message: message}
-}
-
-// Errorf returns a formatted error with the given HTTP status code.
-func Errorf(status int, format string, args ...any) error {
-	return &HTTPError{Status: status, Message: fmt.Sprintf(format, args...)}
-}
-
 // ErrorStatus extracts the HTTP status code from an error. Returns
-// http.StatusInternalServerError if the error does not implement StatusCoder.
+// http.StatusInternalServerError if the error does not implement
+// StatusCoder.
 func ErrorStatus(err error) int {
 	var sc StatusCoder
 	if errors.As(err, &sc) {

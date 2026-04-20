@@ -17,6 +17,10 @@ type Registrar interface {
 	getMode() ValidationMode
 	getCodecs() *codecRegistry
 	routeMiddleware() []Middleware
+	// errorOptionChain returns the scope's error-option list, outermost
+	// first. For a Router this is just the router's own options; for a
+	// Group it is the parent's chain followed by the group's own.
+	errorOptionChain() []ErrorOption
 }
 
 func (r *Router) getValidator() ValidatorFunc              { return r.validator }
@@ -25,6 +29,7 @@ func (r *Router) getErrorBuilder() ValidationErrorBuilder  { return r.errBuilder
 func (r *Router) getMode() ValidationMode                  { return r.mode }
 func (r *Router) getCodecs() *codecRegistry                { return r.codecs }
 func (r *Router) routeMiddleware() []Middleware            { return nil }
+func (r *Router) errorOptionChain() []ErrorOption          { return r.errorOpts }
 
 // handlerConfig bundles the router-level configuration that buildHandler needs.
 type handlerConfig struct {
@@ -35,6 +40,7 @@ type handlerConfig struct {
 	errHandler    ErrorHandler
 	codecs        *codecRegistry
 	responseDesc  *responseDescriptor
+	errorTemplate *Err
 }
 
 // register is the internal generic registration function.
@@ -48,7 +54,7 @@ func register[Req, Resp any](reg Registrar, method, pattern string, h Handler[Re
 	}
 
 	for _, opt := range opts {
-		opt(&ri)
+		opt.applyRoute(&ri)
 	}
 
 	// Determine default status: Void response → 204, otherwise 200.
@@ -75,6 +81,18 @@ func register[Req, Resp any](reg Registrar, method, pattern string, h Handler[Re
 		ri.responseDesc = d
 	}
 
+	// Merge scope error options: router chain → group chain → route options.
+	// Apply them to a fresh *Err that serves as the per-route template.
+	chain := reg.errorOptionChain()
+	ri.errorTemplate = &Err{}
+	for _, opt := range chain {
+		opt.applyErr(ri.errorTemplate)
+	}
+	for _, opt := range ri.errorOpts {
+		opt.applyErr(ri.errorTemplate)
+	}
+	ri.errorCodes = append([]Code{}, ri.errorTemplate.documentedCodes...)
+
 	cfg := handlerConfig{
 		defaultStatus: ri.status,
 		mode:          ri.mode,
@@ -83,6 +101,7 @@ func register[Req, Resp any](reg Registrar, method, pattern string, h Handler[Re
 		errHandler:    reg.getErrorHandler(),
 		codecs:        reg.getCodecs(),
 		responseDesc:  ri.responseDesc,
+		errorTemplate: ri.errorTemplate,
 	}
 
 	ri.handler = buildHandler(h, cfg)
@@ -106,16 +125,36 @@ func register[Req, Resp any](reg Registrar, method, pattern string, h Handler[Re
 // ValidationErrors is routed through cfg.errBuilder.
 func buildHandler[Req, Resp any](h Handler[Req, Resp], cfg handlerConfig) http.Handler {
 	writeErr := func(w http.ResponseWriter, r *http.Request, err error) {
-		// Route ValidationErrors through the builder.
+		// ValidationErrors flow through the configured builder first.
+		// The builder may return *Err directly, or a legacy shape like
+		// *ProblemDetail.
 		var ve ValidationErrors
 		if errors.As(err, &ve) {
 			err = cfg.errBuilder.Build(ve)
 		}
+
+		// Consumer-provided ErrorHandler wins when set.
 		if cfg.errHandler != nil {
 			cfg.errHandler(w, r, err)
 			return
 		}
-		writeErrorResponse(w, err)
+
+		// Legacy path: if the error is (or wraps) a *ProblemDetail,
+		// use the RFC 9457 writer so existing validation output shape
+		// stays intact.
+		var pd *ProblemDetail
+		if errors.As(err, &pd) {
+			writeProblemDetail(w, pd)
+			return
+		}
+
+		// Preferred path: classify as *Err (wrap non-api errors), merge
+		// scope template with inline state, emit declaratively.
+		var apiErr *Err
+		if !errors.As(err, &apiErr) {
+			apiErr = &Err{code: CodeInternal, message: err.Error(), cause: err}
+		}
+		emitErr(w, r, mergeErr(cfg.errorTemplate, apiErr), cfg.codecs)
 	}
 
 	runConstraints := func(req *Req) error {
@@ -141,14 +180,14 @@ func buildHandler[Req, Resp any](h Handler[Req, Resp], cfg handlerConfig) http.H
 		// 406 Not Acceptable: if Accept is explicit and no encoder matches.
 		if accept := r.Header.Get("Accept"); accept != "" {
 			if _, ok := cfg.codecs.negotiate(accept); !ok {
-				writeErr(w, r, Error(http.StatusNotAcceptable, "unsupported Accept media type"))
+				writeErr(w, r, Error(CodeNotAcceptable, WithMessage("unsupported Accept media type")))
 				return
 			}
 		}
 
 		req, err := decodeRequest[Req](r, cfg.codecs)
 		if err != nil {
-			writeErr(w, r, Error(http.StatusBadRequest, err.Error()))
+			writeErr(w, r, Error(CodeBadRequest, WithMessage(err.Error())))
 			return
 		}
 
