@@ -390,6 +390,10 @@ linters:
     - path: _test\.go
       linters:
       - dupl
+    - path: _test\.go
+      text: 'G704: SSRF via taint analysis'
+      linters:
+      - gosec
     - text: 'shadow: declaration of "(?:err|ctx)" shadows declaration at'
       linters:
       - govet

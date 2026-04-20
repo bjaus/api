@@ -568,7 +568,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	//nolint:errcheck // best-effort response write
 	fmt.Fprintln(w, "WebSocket upgrade would happen here.")
-	//nolint:errcheck // best-effort response write
+	//nolint:errcheck,gosec // G705: sample demo, method and path are not user-authored content
 	fmt.Fprintf(w, "Method: %s, Path: %s\n", r.Method, r.URL.Path)
 }
 
