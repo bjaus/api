@@ -91,7 +91,7 @@ func TestRouter_options(t *testing.T) {
 func TestRouter_error_response(t *testing.T) {
 	t.Parallel()
 
-	r := api.New(api.WithError(api.WithErrorBody(api.ErrorBodyEnvelope)))
+	r := api.New(api.WithError(api.WithErrorBody(api.ErrorBodyProblemDetails)))
 	api.Get(r, "/fail", func(_ context.Context, _ *api.Void) (*api.Void, error) {
 		return nil, api.Error(api.CodeUnprocessableContent, api.WithMessage("bad data"))
 	})
@@ -107,10 +107,10 @@ func TestRouter_error_response(t *testing.T) {
 	defer func() { require.NoError(t, resp.Body.Close()) }()
 
 	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
-	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+	assert.Equal(t, "application/problem+json", resp.Header.Get("Content-Type"))
 
-	var env api.Envelope
+	var env api.ProblemDetails
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&env))
 	assert.Equal(t, api.CodeUnprocessableContent, env.Code)
-	assert.Equal(t, "bad data", env.Message)
+	assert.Equal(t, "bad data", env.Detail)
 }

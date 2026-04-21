@@ -26,7 +26,6 @@ type Router struct {
 
 	validator    ValidatorFunc
 	mode         ValidationMode
-	errBuilder   ValidationErrorBuilder
 	errorHandler ErrorHandler
 	errorOpts    []ErrorOption
 
@@ -80,16 +79,6 @@ func WithValidator(v ValidatorFunc) RouterOption {
 func WithValidationMode(m ValidationMode) RouterOption {
 	return RouterOptionFunc(func(r *Router) {
 		r.mode = m
-	})
-}
-
-// WithValidationErrorBuilder installs a custom builder for ValidationErrors.
-// Any layer that returns api.ValidationErrors has its errors routed through
-// the builder before reaching the ErrorHandler. If unset, the framework uses
-// a default builder that produces an RFC 9457 *ProblemDetail.
-func WithValidationErrorBuilder(b ValidationErrorBuilder) RouterOption {
-	return RouterOptionFunc(func(r *Router) {
-		r.errBuilder = b
 	})
 }
 

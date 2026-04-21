@@ -277,10 +277,40 @@ func TestResponse_empty_string_header_not_emitted(t *testing.T) {
 	assert.Empty(t, resp.Header.Values("X-Another"), "empty string header must not be emitted")
 }
 
-func TestResponse_defaultError_statusOnly(t *testing.T) {
+func TestResponse_defaultError_problemDetails(t *testing.T) {
 	t.Parallel()
 
-	r := api.New() // no WithErrorBody configured — default is no body
+	r := api.New() // default is ErrorBodyProblemDetails
+	api.Get(r, "/fail", func(_ context.Context, _ *api.Void) (*api.Void, error) {
+		return nil, api.Error(api.CodeUnprocessableContent, api.WithMessage("bad data"))
+	})
+
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/fail", nil)
+	require.NoError(t, err)
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+
+	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+	assert.Equal(t, "application/problem+json", resp.Header.Get("Content-Type"))
+
+	var pd api.ProblemDetails
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&pd))
+	assert.Equal(t, api.CodeUnprocessableContent, pd.Code)
+	assert.Equal(t, "bad data", pd.Detail)
+	assert.Equal(t, "/fail", pd.Instance)
+	assert.Equal(t, "Unprocessable Entity", pd.Title)
+	assert.Equal(t, "about:blank", pd.Type)
+}
+
+func TestResponse_withoutErrorBody(t *testing.T) {
+	t.Parallel()
+
+	r := api.New(api.WithError(api.WithoutErrorBody()))
 	api.Get(r, "/fail", func(_ context.Context, _ *api.Void) (*api.Void, error) {
 		return nil, api.Error(api.CodeUnprocessableContent, api.WithMessage("bad data"))
 	})
@@ -298,34 +328,7 @@ func TestResponse_defaultError_statusOnly(t *testing.T) {
 	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
-	assert.Empty(t, body, "default: no WithErrorBody means no body emitted")
-}
-
-func TestResponse_errorBodyEnvelope(t *testing.T) {
-	t.Parallel()
-
-	r := api.New(api.WithError(api.WithErrorBody(api.ErrorBodyEnvelope)))
-	api.Get(r, "/fail", func(_ context.Context, _ *api.Void) (*api.Void, error) {
-		return nil, api.Error(api.CodeUnprocessableContent, api.WithMessage("bad data"))
-	})
-
-	srv := httptest.NewServer(r)
-	t.Cleanup(srv.Close)
-
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/fail", nil)
-	require.NoError(t, err)
-
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	defer func() { require.NoError(t, resp.Body.Close()) }()
-
-	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
-	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
-
-	var env api.Envelope
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&env))
-	assert.Equal(t, api.CodeUnprocessableContent, env.Code)
-	assert.Equal(t, "bad data", env.Message)
+	assert.Empty(t, body, "WithoutErrorBody should suppress the body")
 }
 
 func TestResponse_errorBodyText(t *testing.T) {
@@ -353,51 +356,12 @@ func TestResponse_errorBodyText(t *testing.T) {
 	assert.Equal(t, "bad data", string(body))
 }
 
-func TestResponse_ProblemDetail_error_used_directly(t *testing.T) {
-	t.Parallel()
-
-	r := api.New()
-	api.Get(r, "/problem", func(_ context.Context, _ *api.Void) (*api.Void, error) {
-		return nil, &api.ProblemDetail{
-			Type:   "https://example.com/errors/validation",
-			Title:  "Validation Error",
-			Status: http.StatusBadRequest,
-			Detail: "name is required",
-			Errors: []api.ValidationError{
-				{Field: "name", Message: "required"},
-			},
-		}
-	})
-
-	srv := httptest.NewServer(r)
-	t.Cleanup(srv.Close)
-
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/problem", nil)
-	require.NoError(t, err)
-
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	defer func() { require.NoError(t, resp.Body.Close()) }()
-
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
-	assert.Equal(t, "application/problem+json", resp.Header.Get("Content-Type"))
-
-	var body api.ProblemDetail
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
-	assert.Equal(t, "https://example.com/errors/validation", body.Type)
-	assert.Equal(t, "Validation Error", body.Title)
-	assert.Equal(t, http.StatusBadRequest, body.Status)
-	assert.Equal(t, "name is required", body.Detail)
-	require.Len(t, body.Errors, 1)
-	assert.Equal(t, "name", body.Errors[0].Field)
-}
-
 func TestResponse_genericError_wrappedAsInternal(t *testing.T) {
 	t.Parallel()
 
 	// With ErrorBodyEnvelope configured, a plain errors.New is wrapped
 	// into CodeInternal and rendered with the framework envelope.
-	r := api.New(api.WithError(api.WithErrorBody(api.ErrorBodyEnvelope)))
+	r := api.New(api.WithError(api.WithErrorBody(api.ErrorBodyProblemDetails)))
 	api.Get(r, "/boom", func(_ context.Context, _ *api.Void) (*api.Void, error) {
 		return nil, errors.New("something broke")
 	})
@@ -414,10 +378,10 @@ func TestResponse_genericError_wrappedAsInternal(t *testing.T) {
 
 	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 
-	var env api.Envelope
+	var env api.ProblemDetails
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&env))
 	assert.Equal(t, api.CodeInternal, env.Code)
-	assert.Equal(t, "something broke", env.Message)
+	assert.Equal(t, "something broke", env.Detail)
 }
 
 // --- Body kind: io.Reader (streaming) ---

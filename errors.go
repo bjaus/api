@@ -21,31 +21,9 @@ type StatusCoder interface {
 	StatusCode() int
 }
 
-// ProblemDetail is an RFC 9457 problem details response, used as the body
-// shape returned by the built-in ValidationErrorBuilder.
-//
-//nolint:errname // RFC 9457 standard name
-type ProblemDetail struct {
-	Type     string            `json:"type,omitempty"`
-	Title    string            `json:"title,omitempty"`
-	Status   int               `json:"status"`
-	Detail   string            `json:"detail,omitempty"`
-	Instance string            `json:"instance,omitempty"`
-	Errors   []ValidationError `json:"errors,omitempty"`
-}
-
-// Error returns the detail message (or title if detail is empty).
-func (p *ProblemDetail) Error() string {
-	if p.Detail != "" {
-		return p.Detail
-	}
-	return p.Title
-}
-
-// StatusCode returns the HTTP status code.
-func (p *ProblemDetail) StatusCode() int { return p.Status }
-
-// ValidationError describes a single field validation failure.
+// ValidationError describes a single field validation failure. Framework
+// validators attach one per failed field; a slice is returned as
+// ValidationErrors for the framework to route through the error pipeline.
 type ValidationError struct {
 	Field   string `json:"field"`
 	Message string `json:"message"`

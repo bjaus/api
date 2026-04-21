@@ -154,6 +154,13 @@ func (cr *codecRegistry) decoderFor(contentType string) (Decoder, bool) {
 }
 
 // contentTypes returns all encoder content types (for OpenAPI).
+// defaultEncoder returns the router's primary encoder, used as a
+// fallback when codec negotiation fails (e.g., unsupported Accept on
+// an error response).
+func (cr *codecRegistry) defaultEncoder() Encoder {
+	return cr.encoders[0]
+}
+
 func (cr *codecRegistry) contentTypes() []string {
 	cts := make([]string, len(cr.encoders))
 	for i, enc := range cr.encoders {

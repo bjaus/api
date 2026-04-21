@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -8,13 +9,24 @@ import (
 
 // ErrorInfo is the narrow read-only view of an API error exposed to body
 // mappers supplied via WithErrorBody. It carries the semantic payload
-// that belongs in a response body — code, message, details — and nothing
-// else. Response-level concerns (headers, cookies, status) are handled by
-// the framework outside the body mapper.
+// that belongs in a response body — code, message, details, plus the
+// request's instance URI — and nothing else. Response-level concerns
+// (headers, cookies, status) are handled by the framework outside the
+// body mapper.
 type ErrorInfo interface {
+	// Code returns the error's semantic classification.
 	Code() Code
+
+	// Message returns the error's human-readable message.
 	Message() string
+
+	// Details returns the attached typed details.
 	Details() []any
+
+	// Instance returns a URI reference identifying the specific
+	// occurrence of the problem — typically the request's URI. Empty
+	// when the error is examined outside a request pipeline.
+	Instance() string
 }
 
 // Err is the framework's concrete error type. Construct via api.Error;
@@ -64,6 +76,11 @@ func (e *Err) Message() string { return e.message }
 
 // Details returns the attached typed details.
 func (e *Err) Details() []any { return e.details }
+
+// Instance returns the empty string. When an *Err is being rendered by
+// the framework, it is wrapped in a request-aware view that overrides
+// Instance with the request's URI.
+func (e *Err) Instance() string { return "" }
 
 // Unwrap exposes a wrapped cause for errors.Is / errors.As chains.
 func (e *Err) Unwrap() error { return e.cause }
@@ -140,17 +157,24 @@ func WithErrors(codes ...Code) ErrorOption {
 }
 
 // WithErrorBody installs a body mapper: a function that produces the
-// response body's shape from an ErrorInfo. The function's return type
-// drives emission:
+// response body's shape from the request context and ErrorInfo. The
+// function's return type drives emission:
 //
 //   - *SomeStruct → encode via negotiated codec (JSON / XML / ...).
 //   - *string     → write as text/plain.
 //   - nil return  → emit no body for this specific error.
 //
 // Later declarations replace earlier ones.
-func WithErrorBody[T any](fn func(ErrorInfo) *T) ErrorOption {
+func WithErrorBody[T any](fn func(ctx context.Context, e ErrorInfo) *T) ErrorOption {
 	mapper := &typedBodyMapper[T]{fn: fn}
 	return errOptFunc(func(e *Err) { e.body = mapper })
+}
+
+// WithoutErrorBody explicitly opts out of emitting an error body. Errors
+// on routes configured this way produce status plus headers only. Use
+// when the framework default (ErrorBodyProblemDetails) isn't wanted.
+func WithoutErrorBody() ErrorOption {
+	return errOptFunc(func(e *Err) { e.body = noBodyMapper{} })
 }
 
 // bodyMapper is the internal, type-erased view of a WithErrorBody
@@ -158,20 +182,22 @@ func WithErrorBody[T any](fn func(ErrorInfo) *T) ErrorOption {
 // implementation.
 type bodyMapper interface {
 	// produce calls the consumer's mapper and returns the body value
-	// (a reflect.Value of pointer kind) and a zero flag (true if the
-	// mapper returned nil — skip body emission).
-	produce(info ErrorInfo) (rv reflect.Value, skip bool)
+	// (a reflect.Value of pointer kind) and a skip flag (true if no
+	// body should be emitted — either because the mapper returned nil
+	// or because WithoutErrorBody was configured).
+	produce(ctx context.Context, info ErrorInfo) (rv reflect.Value, skip bool)
 
 	// elemType is the T in *T, used at registration for schema generation.
+	// Returns nil when no body should be emitted.
 	elemType() reflect.Type
 }
 
 type typedBodyMapper[T any] struct {
-	fn func(ErrorInfo) *T
+	fn func(ctx context.Context, e ErrorInfo) *T
 }
 
-func (m *typedBodyMapper[T]) produce(info ErrorInfo) (reflect.Value, bool) {
-	v := m.fn(info)
+func (m *typedBodyMapper[T]) produce(ctx context.Context, info ErrorInfo) (reflect.Value, bool) {
+	v := m.fn(ctx, info)
 	if v == nil {
 		return reflect.Value{}, true
 	}
@@ -182,6 +208,15 @@ func (m *typedBodyMapper[T]) elemType() reflect.Type {
 	var zero T
 	return reflect.TypeOf(zero)
 }
+
+// noBodyMapper represents WithoutErrorBody: always skip body emission.
+type noBodyMapper struct{}
+
+func (noBodyMapper) produce(context.Context, ErrorInfo) (reflect.Value, bool) {
+	return reflect.Value{}, true
+}
+
+func (noBodyMapper) elemType() reflect.Type { return nil }
 
 // Compile-time assertions that Err satisfies the interfaces it promises.
 //

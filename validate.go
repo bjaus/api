@@ -3,15 +3,14 @@ package api
 import (
 	"context"
 	"fmt"
-	"net/http"
 )
 
 // Validator is optionally implemented by request types to validate themselves
 // after binding. Implementations that don't need the context can ignore it.
 //
-// Return api.ValidationErrors to have the framework route the failures through
-// the configured ValidationErrorBuilder. Any other error type is forwarded to
-// the router's ErrorHandler untouched.
+// Return api.ValidationErrors to have the framework render the failures
+// through the configured error body mapper. Any other error type is
+// forwarded to the router's error pipeline untouched.
 type Validator interface {
 	Validate(ctx context.Context) error
 }
@@ -24,26 +23,19 @@ type Validator interface {
 //	    return playground.New().Struct(req)
 //	}))
 //
-// Return api.ValidationErrors to get the configured builder; any other error
-// is forwarded as-is.
+// Return api.ValidationErrors to flow through the unified error pipeline;
+// any other error is forwarded as-is.
 type ValidatorFunc func(req any) error
 
 // ValidationErrors is a collection of field-level validation failures.
-// Any layer in the validation pipeline that returns this type (or wraps it
-// via fmt.Errorf %w) is routed through the router's ValidationErrorBuilder.
+// Returning this type (or wrapping it via fmt.Errorf %w) causes the
+// framework to convert it to a 422 Unprocessable Content error with each
+// violation attached as a detail.
 type ValidationErrors []ValidationError
 
 // Error implements the error interface.
 func (v ValidationErrors) Error() string {
 	return fmt.Sprintf("%d validation error(s)", len(v))
-}
-
-// ValidationErrorBuilder shapes a slice of ValidationError into the response
-// error returned to the router's ErrorHandler. Supply one via
-// WithValidationErrorBuilder to unify validation errors with a domain error
-// taxonomy.
-type ValidationErrorBuilder interface {
-	Build(violations ValidationErrors) error
 }
 
 // ValidationMode controls when the constraint-tag checks run relative to the
@@ -66,17 +58,3 @@ const (
 	// by the consumer's Validator and ValidatorFunc.
 	ValidateConstraintsOff
 )
-
-// defaultValidationErrorBuilder builds a *ProblemDetail from a
-// ValidationErrors slice. Used when no custom builder is configured.
-type defaultValidationErrorBuilder struct{}
-
-func (defaultValidationErrorBuilder) Build(violations ValidationErrors) error {
-	return &ProblemDetail{
-		Type:   "about:blank",
-		Title:  "Validation Failed",
-		Status: http.StatusBadRequest,
-		Detail: fmt.Sprintf("%d validation error(s)", len(violations)),
-		Errors: []ValidationError(violations),
-	}
-}

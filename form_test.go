@@ -334,11 +334,11 @@ func TestForm_constraint_validation(t *testing.T) {
 		},
 		"too short": {
 			title:      "AB",
-			wantStatus: http.StatusBadRequest,
+			wantStatus: http.StatusUnprocessableEntity,
 		},
 		"too long": {
 			title:      "This Title Is Way Too Long For The Constraint",
-			wantStatus: http.StatusBadRequest,
+			wantStatus: http.StatusUnprocessableEntity,
 		},
 	}
 

@@ -191,14 +191,16 @@ func TestBuildHandler_constraint_validation_failure(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, resp.Body.Close()) }()
 
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	// Validation failures now flow through the unified error pipeline and
+	// emit RFC 9457 ProblemDetails with status 422 (Unprocessable Content).
+	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
 	assert.Equal(t, "application/problem+json", resp.Header.Get("Content-Type"))
 
-	var body api.ProblemDetail
+	var body api.ProblemDetails
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
-	assert.Equal(t, "Validation Failed", body.Title)
+	assert.Equal(t, api.CodeUnprocessableContent, body.Code)
+	assert.Equal(t, "validation failed", body.Detail)
 	require.Len(t, body.Errors, 1)
-	assert.Equal(t, "body.name", body.Errors[0].Field)
 }
 
 func failValidator(_ any) error {

@@ -102,7 +102,7 @@ func TestError_inlineCookie(t *testing.T) {
 func TestError_inlineDetailWithEnvelope(t *testing.T) {
 	t.Parallel()
 
-	r := api.New(api.WithError(api.WithErrorBody(api.ErrorBodyEnvelope)))
+	r := api.New(api.WithError(api.WithErrorBody(api.ErrorBodyProblemDetails)))
 
 	type fieldErr struct {
 		Field string `json:"field"`
@@ -127,10 +127,10 @@ func TestError_inlineDetailWithEnvelope(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, resp.Body.Close()) }()
 
-	var env api.Envelope
+	var env api.ProblemDetails
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&env))
-	assert.Equal(t, "validation failed", env.Message)
-	require.Len(t, env.Details, 2)
+	assert.Equal(t, "validation failed", env.Detail)
+	require.Len(t, env.Errors, 2)
 }
 
 // --- Scope merging ---
@@ -208,7 +208,7 @@ func TestWithError_detailsAccumulate(t *testing.T) {
 
 	// Router-level detail + route-level detail + inline detail should all appear.
 	r := api.New(api.WithError(
-		api.WithErrorBody(api.ErrorBodyEnvelope),
+		api.WithErrorBody(api.ErrorBodyProblemDetails),
 		api.WithDetail("router-level"),
 	))
 	api.Get(r, "/fail", func(_ context.Context, _ *api.Void) (*api.Void, error) {
@@ -227,12 +227,12 @@ func TestWithError_detailsAccumulate(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, resp.Body.Close()) }()
 
-	var env api.Envelope
+	var env api.ProblemDetails
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&env))
-	require.Len(t, env.Details, 3)
-	assert.Equal(t, "router-level", env.Details[0])
-	assert.Equal(t, "route-level", env.Details[1])
-	assert.Equal(t, "inline", env.Details[2])
+	require.Len(t, env.Errors, 3)
+	assert.Equal(t, "router-level", env.Errors[0])
+	assert.Equal(t, "route-level", env.Errors[1])
+	assert.Equal(t, "inline", env.Errors[2])
 }
 
 // --- WithErrors documents codes ---
@@ -261,7 +261,7 @@ func TestWithErrorBody_conditionalNilSkipsBody(t *testing.T) {
 	t.Parallel()
 
 	// Body mapper returns nil for 401 (no body), envelope for others.
-	r := api.New(api.WithError(api.WithErrorBody(func(e api.ErrorInfo) *condBody {
+	r := api.New(api.WithError(api.WithErrorBody(func(_ context.Context, e api.ErrorInfo) *condBody {
 		if e.Code() == api.CodeUnauthorized {
 			return nil
 		}
@@ -339,11 +339,11 @@ func TestWithErrorBody_inlineOverridesScope(t *testing.T) {
 	t.Parallel()
 
 	// Router says: use envelope body. Inline says: use altBody.
-	r := api.New(api.WithError(api.WithErrorBody(api.ErrorBodyEnvelope)))
+	r := api.New(api.WithError(api.WithErrorBody(api.ErrorBodyProblemDetails)))
 
 	api.Get(r, "/e", func(_ context.Context, _ *api.Void) (*api.Void, error) {
 		return nil, api.Error(api.CodeBadRequest,
-			api.WithErrorBody(func(e api.ErrorInfo) *altBody {
+			api.WithErrorBody(func(_ context.Context, e api.ErrorInfo) *altBody {
 				return &altBody{Code: "INLINE_" + string(e.Code())}
 			}),
 		)
@@ -371,7 +371,7 @@ func TestError_plainErrorWrappedAsInternal(t *testing.T) {
 
 	plainErr := plainStringError("boom")
 
-	r := api.New(api.WithError(api.WithErrorBody(api.ErrorBodyEnvelope)))
+	r := api.New(api.WithError(api.WithErrorBody(api.ErrorBodyProblemDetails)))
 	api.Get(r, "/plain", func(_ context.Context, _ *api.Void) (*api.Void, error) {
 		return nil, plainErr
 	})
@@ -388,10 +388,10 @@ func TestError_plainErrorWrappedAsInternal(t *testing.T) {
 
 	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 
-	var env api.Envelope
+	var env api.ProblemDetails
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&env))
 	assert.Equal(t, api.CodeInternal, env.Code)
-	assert.Equal(t, "boom", env.Message)
+	assert.Equal(t, "boom", env.Detail)
 }
 
 type plainStringError string

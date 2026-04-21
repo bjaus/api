@@ -219,6 +219,10 @@ func errorResponseContent(ri *routeInfo, reg *schemaRegistry, codecCTs []string)
 	}
 
 	elemType := ri.errorTemplate.body.elemType()
+	// WithoutErrorBody produces a nil elemType — no spec content either.
+	if elemType == nil {
+		return nil
+	}
 	if elemType.Kind() == reflect.String {
 		return map[string]MediaObj{
 			"text/plain": {Schema: &JSONSchema{Type: "string"}},

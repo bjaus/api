@@ -13,7 +13,6 @@ type Registrar interface {
 	addRoute(ri routeInfo)
 	getValidator() ValidatorFunc
 	getErrorHandler() ErrorHandler
-	getErrorBuilder() ValidationErrorBuilder
 	getMode() ValidationMode
 	getCodecs() *codecRegistry
 	routeMiddleware() []Middleware
@@ -23,20 +22,18 @@ type Registrar interface {
 	errorOptionChain() []ErrorOption
 }
 
-func (r *Router) getValidator() ValidatorFunc              { return r.validator }
-func (r *Router) getErrorHandler() ErrorHandler            { return r.errorHandler }
-func (r *Router) getErrorBuilder() ValidationErrorBuilder  { return r.errBuilder }
-func (r *Router) getMode() ValidationMode                  { return r.mode }
-func (r *Router) getCodecs() *codecRegistry                { return r.codecs }
-func (r *Router) routeMiddleware() []Middleware            { return nil }
-func (r *Router) errorOptionChain() []ErrorOption          { return r.errorOpts }
+func (r *Router) getValidator() ValidatorFunc     { return r.validator }
+func (r *Router) getErrorHandler() ErrorHandler   { return r.errorHandler }
+func (r *Router) getMode() ValidationMode         { return r.mode }
+func (r *Router) getCodecs() *codecRegistry       { return r.codecs }
+func (r *Router) routeMiddleware() []Middleware   { return nil }
+func (r *Router) errorOptionChain() []ErrorOption { return r.errorOpts }
 
 // handlerConfig bundles the router-level configuration that buildHandler needs.
 type handlerConfig struct {
 	defaultStatus int
 	mode          ValidationMode
 	validator     ValidatorFunc
-	errBuilder    ValidationErrorBuilder
 	errHandler    ErrorHandler
 	codecs        *codecRegistry
 	responseDesc  *responseDescriptor
@@ -66,11 +63,6 @@ func register[Req, Resp any](reg Registrar, method, pattern string, h Handler[Re
 		}
 	}
 
-	errBuilder := reg.getErrorBuilder()
-	if errBuilder == nil {
-		errBuilder = defaultValidationErrorBuilder{}
-	}
-
 	// Void is a special "no response body" marker; it does not carry tags
 	// and does not need descriptor-driven emission.
 	if ri.respType != reflect.TypeFor[Void]() {
@@ -91,13 +83,17 @@ func register[Req, Resp any](reg Registrar, method, pattern string, h Handler[Re
 	for _, opt := range ri.errorOpts {
 		opt.applyErr(ri.errorTemplate)
 	}
+	// Default body mapper: RFC 9457 ProblemDetails. Consumers opt out
+	// with WithoutErrorBody or override with WithErrorBody.
+	if ri.errorTemplate.body == nil {
+		ri.errorTemplate.body = &typedBodyMapper[ProblemDetails]{fn: ErrorBodyProblemDetails}
+	}
 	ri.errorCodes = append([]Code{}, ri.errorTemplate.documentedCodes...)
 
 	cfg := handlerConfig{
 		defaultStatus: ri.status,
 		mode:          ri.mode,
 		validator:     reg.getValidator(),
-		errBuilder:    errBuilder,
 		errHandler:    reg.getErrorHandler(),
 		codecs:        reg.getCodecs(),
 		responseDesc:  ri.responseDesc,
@@ -125,12 +121,16 @@ func register[Req, Resp any](reg Registrar, method, pattern string, h Handler[Re
 // ValidationErrors is routed through cfg.errBuilder.
 func buildHandler[Req, Resp any](h Handler[Req, Resp], cfg handlerConfig) http.Handler {
 	writeErr := func(w http.ResponseWriter, r *http.Request, err error) {
-		// ValidationErrors flow through the configured builder first.
-		// The builder may return *Err directly, or a legacy shape like
-		// *ProblemDetail.
+		// ValidationErrors convert to an *Err with each violation
+		// attached as a detail.
 		var ve ValidationErrors
 		if errors.As(err, &ve) {
-			err = cfg.errBuilder.Build(ve)
+			opts := make([]ErrorOption, 0, len(ve)+1)
+			opts = append(opts, WithMessage("validation failed"))
+			for _, v := range ve {
+				opts = append(opts, WithDetail(v))
+			}
+			err = Error(CodeUnprocessableContent, opts...)
 		}
 
 		// Consumer-provided ErrorHandler wins when set.
@@ -139,17 +139,7 @@ func buildHandler[Req, Resp any](h Handler[Req, Resp], cfg handlerConfig) http.H
 			return
 		}
 
-		// Legacy path: if the error is (or wraps) a *ProblemDetail,
-		// use the RFC 9457 writer so existing validation output shape
-		// stays intact.
-		var pd *ProblemDetail
-		if errors.As(err, &pd) {
-			writeProblemDetail(w, pd)
-			return
-		}
-
-		// Preferred path: classify as *Err (wrap non-api errors), merge
-		// scope template with inline state, emit declaratively.
+		// Classify the error. Non-*Err errors are wrapped as CodeInternal.
 		var apiErr *Err
 		if !errors.As(err, &apiErr) {
 			apiErr = &Err{code: CodeInternal, message: err.Error(), cause: err}

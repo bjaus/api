@@ -11,55 +11,6 @@ import (
 	"github.com/bjaus/api"
 )
 
-func TestProblemDetail_Error(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		pd     api.ProblemDetail
-		expect string
-	}{
-		"with detail": {
-			pd:     api.ProblemDetail{Detail: "something went wrong", Title: "Bad Request"},
-			expect: "something went wrong",
-		},
-		"empty detail returns title": {
-			pd:     api.ProblemDetail{Title: "Not Found"},
-			expect: "Not Found",
-		},
-		"both empty": {
-			pd:     api.ProblemDetail{},
-			expect: "",
-		},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tc.expect, tc.pd.Error())
-		})
-	}
-}
-
-func TestProblemDetail_StatusCode(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		status int
-	}{
-		"400": {status: http.StatusBadRequest},
-		"404": {status: http.StatusNotFound},
-		"500": {status: http.StatusInternalServerError},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			pd := &api.ProblemDetail{Status: tc.status}
-			assert.Equal(t, tc.status, pd.StatusCode())
-		})
-	}
-}
-
 func TestErr_Error(t *testing.T) {
 	t.Parallel()
 
@@ -108,6 +59,17 @@ func TestErr_Details(t *testing.T) {
 	require.Len(t, apiErr.Details(), 2)
 }
 
+func TestErr_Instance_emptyWithoutRequest(t *testing.T) {
+	t.Parallel()
+
+	// An Err built outside of a request pipeline has no Instance.
+	err := api.Error(api.CodeNotFound)
+
+	var apiErr *api.Err
+	require.ErrorAs(t, err, &apiErr)
+	assert.Empty(t, apiErr.Instance())
+}
+
 func TestErr_WithMessagef(t *testing.T) {
 	t.Parallel()
 
@@ -142,10 +104,6 @@ func TestErrorStatus(t *testing.T) {
 		"with *Err StatusCoder": {
 			err:    api.Error(api.CodeForbidden, api.WithMessage("forbidden")),
 			expect: http.StatusForbidden,
-		},
-		"with ProblemDetail StatusCoder": {
-			err:    &api.ProblemDetail{Status: http.StatusConflict},
-			expect: http.StatusConflict,
 		},
 		"without StatusCoder": {
 			err:    errors.New("plain error"),

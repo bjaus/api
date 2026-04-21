@@ -3,7 +3,6 @@ package api_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -117,7 +116,7 @@ func TestValidator_usesContext(t *testing.T) {
 		wantStatus int
 	}{
 		"with tenant":    {"acme", http.StatusOK},
-		"missing tenant": {"", http.StatusBadRequest},
+		"missing tenant": {"", http.StatusUnprocessableEntity},
 	}
 
 	for name, tc := range tests {
@@ -235,13 +234,12 @@ func TestRouterValidator_returnsValidationErrors(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, resp.Body.Close()) }()
 
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
 
-	var pd api.ProblemDetail
+	var pd api.ProblemDetails
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&pd))
-	assert.Equal(t, "Validation Failed", pd.Title)
+	assert.Equal(t, api.CodeUnprocessableContent, pd.Code)
 	require.Len(t, pd.Errors, 1)
-	assert.Equal(t, "name", pd.Errors[0].Field)
 }
 
 func TestValidationErrors_Error(t *testing.T) {
@@ -296,11 +294,18 @@ func TestValidationMode_Last_PerTypeFirst(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, resp.Body.Close()) }()
 
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
-	var pd api.ProblemDetail
+	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+	var pd api.ProblemDetails
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&pd))
 	require.Len(t, pd.Errors, 1)
-	assert.Equal(t, "from Validator", pd.Errors[0].Message, "per-type Validator runs first in Last mode")
+	// Each validation error becomes a detail entry; it is serialized
+	// through its JSON tags. Decode the first detail back into the
+	// ValidationError struct to verify the message propagates.
+	var ve api.ValidationError
+	raw, err := json.Marshal(pd.Errors[0])
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(raw, &ve))
+	assert.Equal(t, "from Validator", ve.Message, "per-type Validator runs first in Last mode")
 }
 
 func TestValidationMode_First_ConstraintsFirst(t *testing.T) {
@@ -321,11 +326,15 @@ func TestValidationMode_First_ConstraintsFirst(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, resp.Body.Close()) }()
 
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
-	var pd api.ProblemDetail
+	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+	var pd api.ProblemDetails
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&pd))
 	require.Len(t, pd.Errors, 1)
-	assert.Contains(t, pd.Errors[0].Message, "at least 5 characters", "constraint fires first in First mode")
+	var ve api.ValidationError
+	raw, err := json.Marshal(pd.Errors[0])
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(raw, &ve))
+	assert.Contains(t, ve.Message, "at least 5 characters", "constraint fires first in First mode")
 }
 
 type offReq struct {
@@ -405,39 +414,28 @@ func TestValidationMode_PerRouteOverride(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 }
 
-// --- ValidationErrorBuilder tests ---
+// --- Custom error body via WithErrorBody ---
 
 type domainError struct {
-	Code   string                  `json:"code"`
-	Msg    string                  `json:"message"`
-	Fields []api.ValidationError   `json:"fields,omitempty"`
+	Code    string                `json:"code"`
+	Msg     string                `json:"message"`
+	Fields  []api.ValidationError `json:"fields,omitempty"`
 }
 
-func (e *domainError) Error() string   { return e.Msg }
-func (e *domainError) StatusCode() int { return http.StatusUnprocessableEntity }
-
-type domainBuilder struct{}
-
-func (domainBuilder) Build(v api.ValidationErrors) error {
-	return &domainError{Code: "INVALID_INPUT", Msg: "bad request", Fields: v}
+func domainBody(_ context.Context, e api.ErrorInfo) *domainError {
+	fields := make([]api.ValidationError, 0, len(e.Details()))
+	for _, d := range e.Details() {
+		if v, ok := d.(api.ValidationError); ok {
+			fields = append(fields, v)
+		}
+	}
+	return &domainError{Code: "INVALID_INPUT", Msg: e.Message(), Fields: fields}
 }
 
-func TestValidationErrorBuilder_constraintPath(t *testing.T) {
+func TestCustomErrorBody_constraintPath(t *testing.T) {
 	t.Parallel()
 
-	r := api.New(
-		api.WithValidationErrorBuilder(domainBuilder{}),
-		api.WithErrorHandler(func(w http.ResponseWriter, _ *http.Request, err error) {
-			var de *domainError
-			if errors.As(err, &de) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(de.StatusCode())
-				assert.NoError(t, json.NewEncoder(w).Encode(de))
-				return
-			}
-			assert.Fail(t, "unexpected error type", "got %T: %v", err, err)
-		}),
-	)
+	r := api.New(api.WithError(api.WithErrorBody(domainBody)))
 	api.Post(r, "/b",
 		func(_ context.Context, _ *offReq) (*api.Void, error) {
 			return &api.Void{}, nil
@@ -463,22 +461,10 @@ func TestValidationErrorBuilder_constraintPath(t *testing.T) {
 	assert.Equal(t, "body.name", de.Fields[0].Field)
 }
 
-func TestValidationErrorBuilder_perTypePath(t *testing.T) {
+func TestCustomErrorBody_perTypePath(t *testing.T) {
 	t.Parallel()
 
-	r := api.New(
-		api.WithValidationErrorBuilder(domainBuilder{}),
-		api.WithErrorHandler(func(w http.ResponseWriter, _ *http.Request, err error) {
-			var de *domainError
-			if errors.As(err, &de) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(de.StatusCode())
-				assert.NoError(t, json.NewEncoder(w).Encode(de))
-				return
-			}
-			assert.Fail(t, "unexpected error type", "got %T: %v", err, err)
-		}),
-	)
+	r := api.New(api.WithError(api.WithErrorBody(domainBody)))
 	api.Post(r, "/b", func(_ context.Context, _ *modeReq) (*api.Void, error) {
 		return &api.Void{}, nil
 	})

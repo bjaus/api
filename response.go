@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"reflect"
@@ -190,15 +189,6 @@ func headerFieldValues(fv reflect.Value) []string {
 	return nil
 }
 
-// writeProblemDetail writes a *ProblemDetail as an RFC 9457 problem
-// details response. Called only from the validation path.
-func writeProblemDetail(w http.ResponseWriter, pd *ProblemDetail) {
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(pd.Status)
-	//nolint:errcheck,errchkjson,gosec // best-effort after WriteHeader
-	json.NewEncoder(w).Encode(pd)
-}
-
 // mergeErr combines a route's scope-level error template with the
 // inline state carried by the handler-returned *Err. Scalar options
 // (message, body mapper, cause) from the inline state replace the
@@ -259,6 +249,18 @@ func mergeErr(template, inline *Err) *Err {
 	return final
 }
 
+// errInfoView wraps *Err with the request URI so body mappers can read
+// ErrorInfo.Instance() without the *Err itself knowing about HTTP. The
+// framework constructs this view at emission time.
+//
+//nolint:errname // internal view type, not a distinct error.
+type errInfoView struct {
+	*Err
+	instance string
+}
+
+func (v *errInfoView) Instance() string { return v.instance }
+
 // emitErr renders a fully-resolved *Err to the response writer. Status
 // comes from the Code. Cookies and headers are written first, then body
 // (if any) is emitted via the configured mapper.
@@ -280,7 +282,8 @@ func emitErr(w http.ResponseWriter, r *http.Request, e *Err, codecs *codecRegist
 		return
 	}
 
-	rv, skip := e.body.produce(e)
+	info := &errInfoView{Err: e, instance: r.URL.RequestURI()}
+	rv, skip := e.body.produce(r.Context(), info)
 	if skip {
 		w.WriteHeader(status)
 		return
@@ -297,9 +300,24 @@ func emitErr(w http.ResponseWriter, r *http.Request, e *Err, codecs *codecRegist
 		return
 	}
 
-	enc, _ := codecs.negotiate(r.Header.Get("Accept"))
-	w.Header().Set("Content-Type", enc.ContentType())
+	bodyVal := rv.Interface()
+
+	// Error bodies always emit regardless of whether the request's
+	// Accept header matched a codec — clients benefit from seeing the
+	// error even when their Accept is too narrow. Negotiate first, but
+	// fall back to the router's default codec if negotiation failed.
+	enc, ok := codecs.negotiate(r.Header.Get("Accept"))
+	if !ok || enc == nil {
+		enc = codecs.defaultEncoder()
+	}
+	contentType := enc.ContentType()
+	// If the body value declares its own content type (e.g. ProblemDetails
+	// emits application/problem+json per RFC 9457), honor it.
+	if ct, ok := bodyVal.(interface{ ContentType() string }); ok {
+		contentType = ct.ContentType()
+	}
+	w.Header().Set("Content-Type", contentType)
 	w.WriteHeader(status)
 	//nolint:errcheck,gosec // best-effort after WriteHeader
-	enc.Encode(w, rv.Interface())
+	enc.Encode(w, bodyVal)
 }

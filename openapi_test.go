@@ -219,14 +219,14 @@ func TestSpec_components_schemas(t *testing.T) {
 	assert.Equal(t, "#/components/schemas/Resp", bSchema.Ref)
 }
 
-func TestSpec_error_responses_default_noBody(t *testing.T) {
+func TestSpec_error_responses_default_problemDetails(t *testing.T) {
 	t.Parallel()
 
 	type Resp struct {
 		OK bool `json:"ok"`
 	}
 
-	r := api.New() // no WithErrorBody — spec should describe no content
+	r := api.New() // default is ProblemDetails
 	api.Get(r, "/ping", func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
 		return &api.Resp[Resp]{Body: Resp{OK: true}}, nil
 	})
@@ -241,19 +241,22 @@ func TestSpec_error_responses_default_noBody(t *testing.T) {
 	// No path param → no 404.
 	assert.NotContains(t, op.Responses, "404")
 
-	// No WithErrorBody configured → error responses have no content.
-	assert.Empty(t, op.Responses["400"].Content, "without WithErrorBody, error responses should have no content")
-	assert.Empty(t, op.Responses["500"].Content)
+	// Default ProblemDetails schema referenced.
+	assert.Equal(t, "#/components/schemas/ProblemDetails", op.Responses["400"].Content["application/json"].Schema.Ref)
+	assert.Equal(t, "#/components/schemas/ProblemDetails", op.Responses["500"].Content["application/json"].Schema.Ref)
+
+	require.NotNil(t, spec.Components)
+	assert.Contains(t, spec.Components.Schemas, "ProblemDetails")
 }
 
-func TestSpec_error_responses_envelope(t *testing.T) {
+func TestSpec_error_responses_withoutBody(t *testing.T) {
 	t.Parallel()
 
 	type Resp struct {
 		OK bool `json:"ok"`
 	}
 
-	r := api.New(api.WithError(api.WithErrorBody(api.ErrorBodyEnvelope)))
+	r := api.New(api.WithError(api.WithoutErrorBody()))
 	api.Get(r, "/ping", func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
 		return &api.Resp[Resp]{Body: Resp{OK: true}}, nil
 	})
@@ -261,12 +264,9 @@ func TestSpec_error_responses_envelope(t *testing.T) {
 	spec := r.Spec()
 	op := spec.Paths["/ping"]["get"]
 
-	// Envelope-configured errors reference the Envelope schema.
-	assert.Equal(t, "#/components/schemas/Envelope", op.Responses["400"].Content["application/json"].Schema.Ref)
-	assert.Equal(t, "#/components/schemas/Envelope", op.Responses["500"].Content["application/json"].Schema.Ref)
-
-	require.NotNil(t, spec.Components)
-	assert.Contains(t, spec.Components.Schemas, "Envelope")
+	// WithoutErrorBody → spec has no content for error responses.
+	assert.Empty(t, op.Responses["400"].Content)
+	assert.Empty(t, op.Responses["500"].Content)
 }
 
 func TestSpec_error_responses_text(t *testing.T) {
@@ -353,23 +353,29 @@ func TestSpec_error_responses_dedup(t *testing.T) {
 	assert.Contains(t, op.Responses, "500")
 }
 
-func TestSpec_Envelope_schema(t *testing.T) {
+func TestSpec_ProblemDetails_schema(t *testing.T) {
 	t.Parallel()
 
-	r := api.New(api.WithError(api.WithErrorBody(api.ErrorBodyEnvelope)))
+	r := api.New() // default → ProblemDetails
 	api.Get(r, "/health", func(_ context.Context, _ *api.Void) (*api.Void, error) {
 		return &api.Void{}, nil
 	})
 
 	spec := r.Spec()
 	require.NotNil(t, spec.Components)
-	require.Contains(t, spec.Components.Schemas, "Envelope")
+	require.Contains(t, spec.Components.Schemas, "ProblemDetails")
 
-	envSchema := spec.Components.Schemas["Envelope"]
-	assert.Equal(t, "object", envSchema.Type)
-	assert.Contains(t, envSchema.Properties, "code")
-	assert.Contains(t, envSchema.Properties, "message")
-	assert.Contains(t, envSchema.Properties, "details")
+	pdSchema := spec.Components.Schemas["ProblemDetails"]
+	assert.Equal(t, "object", pdSchema.Type)
+	// RFC 9457 core fields.
+	assert.Contains(t, pdSchema.Properties, "type")
+	assert.Contains(t, pdSchema.Properties, "title")
+	assert.Contains(t, pdSchema.Properties, "status")
+	assert.Contains(t, pdSchema.Properties, "detail")
+	assert.Contains(t, pdSchema.Properties, "instance")
+	// Framework extensions.
+	assert.Contains(t, pdSchema.Properties, "code")
+	assert.Contains(t, pdSchema.Properties, "errors")
 }
 
 func TestSpec_WithServers(t *testing.T) {
