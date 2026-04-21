@@ -56,7 +56,6 @@ func GetRequestID(r *http.Request) string {
 
 func defaultIDGenerator() string {
 	b := make([]byte, 16)
-	//nolint:errcheck // crypto/rand.Read always returns nil error
 	rand.Read(b)
 	return hex.EncodeToString(b)
 }

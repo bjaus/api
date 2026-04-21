@@ -101,7 +101,6 @@ func setCSRFToken(ctx context.Context, token string) context.Context {
 
 func generateCSRFToken(length int) string {
 	b := make([]byte, length)
-	//nolint:errcheck // crypto/rand.Read always returns nil error
 	rand.Read(b)
 	return hex.EncodeToString(b)
 }

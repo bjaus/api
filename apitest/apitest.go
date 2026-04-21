@@ -85,7 +85,6 @@ func do[Resp any](t testing.TB, c *Client, method, path string, body any) *Respo
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	//nolint:gosec // G704: apitest is a test helper; caller supplies the URL
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("apitest: execute request: %v", err)
