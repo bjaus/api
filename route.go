@@ -34,6 +34,11 @@ type routeInfo struct {
 	requestDesc  *requestDescriptor
 	responseDesc *responseDescriptor
 
+	// extraResponses documents additional response status codes beyond the
+	// success and the auto-baseline error codes. Keyed by HTTP status; value
+	// is the response body type (nil = no body).
+	extraResponses map[int]reflect.Type
+
 	// errorOpts accumulates error-related options attached directly to
 	// this route via api.WithError.
 	errorOpts []ErrorOption
@@ -161,5 +166,24 @@ func WithCallback(name string, cb map[string]PathItem) RouteOption {
 			ri.callbacks = make(map[string]map[string]PathItem)
 		}
 		ri.callbacks[name] = cb
+	})
+}
+
+// WithResponse documents an additional response status code in the OpenAPI
+// spec. The body argument supplies the response schema by example: pass a
+// value of the type that will be returned for that status (e.g. a struct
+// describing a 409 conflict body). Pass nil to document the status with no
+// body. Subsequent calls for the same status replace earlier entries; user-
+// supplied responses win over the auto-generated error baseline.
+func WithResponse(code int, body any) RouteOption {
+	return RouteOptionFunc(func(ri *routeInfo) {
+		if ri.extraResponses == nil {
+			ri.extraResponses = make(map[int]reflect.Type)
+		}
+		if body == nil {
+			ri.extraResponses[code] = nil
+			return
+		}
+		ri.extraResponses[code] = reflect.TypeOf(body)
 	})
 }

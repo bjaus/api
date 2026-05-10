@@ -947,3 +947,75 @@ func TestSpec_form_schema_from_embedded_struct(t *testing.T) {
 	assert.Contains(t, media.Schema.Properties, "note")
 	assert.Contains(t, media.Schema.Required, "title")
 }
+
+func TestSpec_with_response_extra_status_with_body(t *testing.T) {
+	t.Parallel()
+
+	type Conflict struct {
+		Reason string `json:"reason"`
+		Field  string `json:"field"`
+	}
+	type Resp struct {
+		ID string `json:"id"`
+	}
+
+	r := api.New()
+	api.Post(r, "/users", func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{ID: "1"}}, nil
+	}, api.WithResponse(http.StatusConflict, Conflict{}))
+
+	spec := r.Spec()
+	op := spec.Paths["/users"]["post"]
+	resp, ok := op.Responses["409"]
+	require.True(t, ok)
+	assert.Equal(t, "Conflict", resp.Description)
+
+	media, ok := resp.Content["application/json"]
+	require.True(t, ok)
+	require.NotNil(t, media.Schema)
+	assert.Equal(t, "#/components/schemas/Conflict", media.Schema.Ref)
+
+	require.Contains(t, spec.Components.Schemas, "Conflict")
+	conflictSchema := spec.Components.Schemas["Conflict"]
+	assert.Contains(t, conflictSchema.Properties, "reason")
+	assert.Contains(t, conflictSchema.Properties, "field")
+}
+
+func TestSpec_with_response_no_body(t *testing.T) {
+	t.Parallel()
+
+	r := api.New()
+	api.Get(r, "/items", func(_ context.Context, _ *api.Void) (*api.Void, error) {
+		return &api.Void{}, nil
+	}, api.WithResponse(http.StatusAccepted, nil))
+
+	spec := r.Spec()
+	op := spec.Paths["/items"]["get"]
+	resp, ok := op.Responses["202"]
+	require.True(t, ok)
+	assert.Equal(t, "Accepted", resp.Description)
+	assert.Empty(t, resp.Content)
+}
+
+func TestSpec_with_response_overrides_auto_baseline(t *testing.T) {
+	t.Parallel()
+
+	type ItemNotFound struct {
+		ItemID string `json:"item_id"`
+	}
+
+	r := api.New()
+	api.Get(r, "/items/{id}", func(_ context.Context, _ *api.Void) (*api.Void, error) {
+		return &api.Void{}, nil
+	}, api.WithResponse(http.StatusNotFound, ItemNotFound{}))
+
+	spec := r.Spec()
+	op := spec.Paths["/items/{id}"]["get"]
+	resp, ok := op.Responses["404"]
+	require.True(t, ok)
+
+	media, ok := resp.Content["application/json"]
+	require.True(t, ok)
+	require.NotNil(t, media.Schema)
+	assert.Equal(t, "#/components/schemas/ItemNotFound", media.Schema.Ref)
+}

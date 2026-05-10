@@ -275,6 +275,20 @@ func buildSuccessResponse(ri *routeInfo, reg *schemaRegistry, codecCTs []string,
 	return status, ResponseObj{Description: "Successful response", Content: content}
 }
 
+// buildExtraResponse produces a ResponseObj for a status documented via
+// WithResponse. A nil bodyType yields a body-less entry.
+func buildExtraResponse(code int, bodyType reflect.Type, reg *schemaRegistry, codecCTs []string) ResponseObj {
+	if bodyType == nil {
+		return ResponseObj{Description: http.StatusText(code)}
+	}
+	schema := reg.typeToSchema(bodyType)
+	content := make(map[string]MediaObj, len(codecCTs))
+	for _, ct := range codecCTs {
+		content[ct] = MediaObj{Schema: &schema}
+	}
+	return ResponseObj{Description: http.StatusText(code), Content: content}
+}
+
 // buildResponseHeaders produces the OpenAPI Headers map for a response from
 // the precomputed descriptor. Returns nil when the response declares no
 // header or cookie fields. Cookies share a single Set-Cookie entry whose
@@ -374,6 +388,11 @@ func buildOperation(ri *routeInfo, reg *schemaRegistry, codecCTs []string) Opera
 			Description: http.StatusText(code),
 			Content:     errContent,
 		}
+	}
+
+	// User-declared extra responses override anything in the auto baseline.
+	for code, bodyType := range ri.extraResponses {
+		op.Responses[statusToString(code)] = buildExtraResponse(code, bodyType, reg, codecCTs)
 	}
 
 	if hdrs := buildResponseHeaders(ri.responseDesc); hdrs != nil {
