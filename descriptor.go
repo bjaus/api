@@ -10,10 +10,11 @@ import (
 // fields, built once at route registration. The encoder iterates the
 // descriptor's slices per request instead of reparsing tags.
 type responseDescriptor struct {
-	status  *responseFieldDesc
-	headers []responseHeaderDesc
-	cookies []responseCookieDesc
-	body    *responseBodyDesc
+	status   *responseFieldDesc
+	headers  []responseHeaderDesc
+	cookies  []responseCookieDesc
+	trailers []responseTrailerDesc
+	body     *responseBodyDesc
 }
 
 // responseFieldDesc locates a scalar field by its reflect.VisibleFields
@@ -32,6 +33,11 @@ type responseHeaderDesc struct {
 }
 
 type responseCookieDesc struct {
+	responseFieldDesc
+	name string
+}
+
+type responseTrailerDesc struct {
 	responseFieldDesc
 	name string
 }
@@ -75,6 +81,7 @@ func buildResponseDescriptor(t reflect.Type) (*responseDescriptor, error) {
 	desc := &responseDescriptor{}
 	seenHeader := map[string]struct{}{}
 	seenCookie := map[string]struct{}{}
+	seenTrailer := map[string]struct{}{}
 
 	for _, f := range reflect.VisibleFields(t) {
 		if !f.IsExported() {
@@ -134,6 +141,21 @@ func buildResponseDescriptor(t reflect.Type) (*responseDescriptor, error) {
 			}
 			seenCookie[name] = struct{}{}
 			desc.cookies = append(desc.cookies, responseCookieDesc{
+				responseFieldDesc: fd,
+				name:              name,
+			})
+			continue
+		}
+
+		if name, ok := f.Tag.Lookup("trailer"); ok {
+			if name == "" {
+				return nil, fmt.Errorf("empty trailer tag on field %s in %s", f.Name, t)
+			}
+			if _, dup := seenTrailer[name]; dup {
+				return nil, fmt.Errorf("duplicate trailer %q in response type %s", name, t)
+			}
+			seenTrailer[name] = struct{}{}
+			desc.trailers = append(desc.trailers, responseTrailerDesc{
 				responseFieldDesc: fd,
 				name:              name,
 			})

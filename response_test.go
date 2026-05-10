@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -826,5 +827,126 @@ func TestResponse_nilReturn_writesDefaultStatus(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, resp.Body.Close()) }()
 
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestResponse_declarative_trailers(t *testing.T) {
+	t.Parallel()
+
+	type Resp struct {
+		Checksum string `trailer:"X-Checksum"`
+		Body     struct {
+			Value string `json:"value"`
+		}
+	}
+
+	r := api.New()
+	api.Get(r, "/data", func(_ context.Context, _ *api.Void) (*Resp, error) {
+		out := &Resp{Checksum: "deadbeef"}
+		out.Body.Value = "ok"
+		return out, nil
+	})
+
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/data", nil)
+	require.NoError(t, err)
+
+	resp, err := srv.Client().Do(req)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Trailers populate on resp.Trailer after the body is fully read.
+	_, err = io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, "deadbeef", resp.Trailer.Get("X-Checksum"))
+}
+
+func TestResponse_io_Reader_supports_range(t *testing.T) {
+	t.Parallel()
+
+	type Resp struct {
+		Body io.Reader
+	}
+
+	const payload = "0123456789ABCDEFGHIJ"
+
+	r := api.New()
+	api.Get(r, "/file", func(_ context.Context, _ *api.Void) (*Resp, error) {
+		return &Resp{Body: bytes.NewReader([]byte(payload))}, nil
+	})
+
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/file", nil)
+	require.NoError(t, err)
+	req.Header.Set("Range", "bytes=4-9")
+
+	resp, err := srv.Client().Do(req)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+
+	assert.Equal(t, http.StatusPartialContent, resp.StatusCode)
+	assert.Equal(t, "bytes 4-9/20", resp.Header.Get("Content-Range"))
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, "456789", string(body))
+}
+
+func TestResponse_validation_catches_bad_body(t *testing.T) {
+	t.Parallel()
+
+	type Resp struct {
+		Body struct {
+			Name string `json:"name" minLength:"3"`
+		}
+	}
+
+	r := api.New(api.WithResponseValidation())
+	api.Get(r, "/bad", func(_ context.Context, _ *api.Void) (*Resp, error) {
+		out := &Resp{}
+		out.Body.Name = "x" // too short — fails minLength:"3"
+		return out, nil
+	})
+
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/bad", nil)
+	require.NoError(t, err)
+	resp, err := srv.Client().Do(req)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+}
+
+func TestResponse_validation_disabled_by_default(t *testing.T) {
+	t.Parallel()
+
+	type Resp struct {
+		Body struct {
+			Name string `json:"name" minLength:"3"`
+		}
+	}
+
+	r := api.New() // no WithResponseValidation
+	api.Get(r, "/lax", func(_ context.Context, _ *api.Void) (*Resp, error) {
+		out := &Resp{}
+		out.Body.Name = "x"
+		return out, nil
+	})
+
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/lax", nil)
+	require.NoError(t, err)
+	resp, err := srv.Client().Do(req)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }

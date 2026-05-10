@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"net/http"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -14,6 +16,11 @@ type Router struct {
 	middleware []Middleware
 	routes     []routeInfo
 
+	// methodsByPattern tracks which HTTP methods have been registered for
+	// each pattern. Used to auto-generate HEAD (from GET) and OPTIONS (Allow
+	// header) responses without requiring per-route registration.
+	methodsByPattern map[string]map[string]struct{}
+
 	title   string
 	version string
 
@@ -24,10 +31,11 @@ type Router struct {
 
 	webhooks map[string]PathItem
 
-	validator    ValidatorFunc
-	mode         ValidationMode
-	errorHandler ErrorHandler
-	errorOpts    []ErrorOption
+	validator         ValidatorFunc
+	mode              ValidationMode
+	errorHandler      ErrorHandler
+	errorOpts         []ErrorOption
+	validateResponses bool
 
 	encoders []Encoder
 	decoders []Decoder
@@ -79,6 +87,16 @@ func WithValidator(v ValidatorFunc) RouterOption {
 func WithValidationMode(m ValidationMode) RouterOption {
 	return RouterOptionFunc(func(r *Router) {
 		r.mode = m
+	})
+}
+
+// WithResponseValidation enables constraint-tag validation of response
+// structs before they are encoded. A failed response validation produces a
+// 500 with the violations attached. Off by default; intended primarily for
+// development to surface handler bugs that emit malformed shapes.
+func WithResponseValidation() RouterOption {
+	return RouterOptionFunc(func(r *Router) {
+		r.validateResponses = true
 	})
 }
 
@@ -163,7 +181,8 @@ func WithTracer(s SpanStarter) RouterOption {
 // New creates a new Router with the given options.
 func New(opts ...RouterOption) *Router {
 	r := &Router{
-		mux: http.NewServeMux(),
+		mux:              http.NewServeMux(),
+		methodsByPattern: make(map[string]map[string]struct{}),
 	}
 	for _, opt := range opts {
 		opt.applyRouter(r)
@@ -177,13 +196,144 @@ func (r *Router) Use(mw ...Middleware) {
 	r.middleware = append(r.middleware, mw...)
 }
 
-// ServeHTTP implements http.Handler.
+// ServeHTTP implements http.Handler. Middleware is applied in registration
+// order, then dispatch goes through autoMethodsHandler so HEAD and OPTIONS
+// requests get derived responses when no explicit handler exists.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	handler := http.Handler(r.mux)
+	handler := http.Handler(http.HandlerFunc(r.dispatch))
 	for i := len(r.middleware) - 1; i >= 0; i-- {
 		handler = r.middleware[i](handler)
 	}
 	handler.ServeHTTP(w, req)
+}
+
+// dispatch routes the request through the mux, deriving HEAD from GET and
+// auto-generating OPTIONS Allow responses when no explicit handler exists.
+func (r *Router) dispatch(w http.ResponseWriter, req *http.Request) {
+	switch req.Method {
+	case http.MethodHead:
+		if r.methodRegistered(req, http.MethodHead) {
+			r.mux.ServeHTTP(w, req)
+			return
+		}
+		if pattern, ok := r.matchPattern(req, http.MethodGet); ok {
+			r.serveHEADFromGET(w, req, pattern)
+			return
+		}
+	case http.MethodOptions:
+		if r.methodRegistered(req, http.MethodOptions) {
+			r.mux.ServeHTTP(w, req)
+			return
+		}
+		if methods := r.allowedMethods(req); len(methods) > 0 {
+			methods = appendMethod(methods, http.MethodOptions)
+			w.Header().Set("Allow", strings.Join(methods, ", "))
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+	}
+	r.mux.ServeHTTP(w, req)
+}
+
+// methodRegistered reports whether the given method is explicitly registered
+// for the pattern that matches req's URL path.
+func (r *Router) methodRegistered(req *http.Request, method string) bool {
+	pattern, ok := r.matchPattern(req, method)
+	if !ok {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if methods, exists := r.methodsByPattern[pattern]; exists {
+		_, present := methods[method]
+		return present
+	}
+	return false
+}
+
+// matchPattern returns the bare path pattern in r.mux that matches req's URL
+// path for the given method, or "" if no match. mux.Handler returns the
+// pattern with the method prefix ("GET /items"); we strip it.
+func (r *Router) matchPattern(req *http.Request, method string) (string, bool) {
+	probe := req.Clone(req.Context())
+	probe.Method = method
+	_, pattern := r.mux.Handler(probe)
+	return stripMethodPrefix(pattern), pattern != ""
+}
+
+// stripMethodPrefix removes the leading "METHOD " token (if any) from a
+// ServeMux pattern, leaving just the path.
+func stripMethodPrefix(pattern string) string {
+	if i := strings.IndexByte(pattern, ' '); i >= 0 {
+		return pattern[i+1:]
+	}
+	return pattern
+}
+
+// allowedMethods returns the list of methods registered for the pattern that
+// matches req's URL path, regardless of method.
+func (r *Router) allowedMethods(req *http.Request) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for pattern, methods := range r.methodsByPattern {
+		probe := req.Clone(req.Context())
+		probe.Method = http.MethodGet
+		// Re-resolve through mux to honor the same matching semantics; if any
+		// method matches the path we report that pattern's methods.
+		if matched := r.patternMatchesUnsafe(probe, pattern); matched {
+			out := make([]string, 0, len(methods))
+			for m := range methods {
+				out = append(out, m)
+			}
+			sort.Strings(out)
+			return out
+		}
+	}
+	return nil
+}
+
+// patternMatchesUnsafe checks whether req's URL path matches pattern via mux
+// resolution. Caller must hold r.mu.
+func (r *Router) patternMatchesUnsafe(req *http.Request, pattern string) bool {
+	for method := range r.methodsByPattern[pattern] {
+		probe := req.Clone(req.Context())
+		probe.Method = method
+		_, matched := r.mux.Handler(probe)
+		if stripMethodPrefix(matched) == pattern {
+			return true
+		}
+	}
+	return false
+}
+
+// serveHEADFromGET swaps a HEAD request to GET, runs the GET handler, and
+// discards the body bytes — the headers and status are preserved.
+func (r *Router) serveHEADFromGET(w http.ResponseWriter, req *http.Request, _ string) {
+	getReq := req.Clone(req.Context())
+	getReq.Method = http.MethodGet
+	r.mux.ServeHTTP(noBodyWriter{ResponseWriter: w}, getReq)
+}
+
+// noBodyWriter discards body writes; headers and status pass through.
+type noBodyWriter struct {
+	http.ResponseWriter
+}
+
+func (noBodyWriter) Write(p []byte) (int, error) { return len(p), nil }
+
+// appendMethod returns a sorted copy of methods with method added (if not
+// already present). The input slice is not mutated.
+func appendMethod(methods []string, method string) []string {
+	for _, m := range methods {
+		if m == method {
+			return methods
+		}
+	}
+	out := make([]string, 0, len(methods)+1)
+	out = append(out, methods...)
+	out = append(out, method)
+	sort.Strings(out)
+	return out
 }
 
 // ListenAndServe starts an HTTP server on the given address.
@@ -219,4 +369,9 @@ func (r *Router) addRoute(ri routeInfo) {
 
 	r.mux.Handle(ri.method+" "+ri.pattern, ri.handler)
 	r.routes = append(r.routes, ri)
+
+	if r.methodsByPattern[ri.pattern] == nil {
+		r.methodsByPattern[ri.pattern] = make(map[string]struct{})
+	}
+	r.methodsByPattern[ri.pattern][ri.method] = struct{}{}
 }

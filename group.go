@@ -97,6 +97,7 @@ func (g *Group) getValidator() ValidatorFunc   { return g.parent.getValidator() 
 func (g *Group) getErrorHandler() ErrorHandler { return g.parent.getErrorHandler() }
 func (g *Group) getMode() ValidationMode       { return g.parent.getMode() }
 func (g *Group) getCodecs() *codecRegistry     { return g.parent.getCodecs() }
+func (g *Group) getValidateResponses() bool    { return g.parent.getValidateResponses() }
 
 // errorOptionChain returns the parent's chain followed by this group's
 // own error options. Outer scopes come first so later scopes can

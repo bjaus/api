@@ -114,3 +114,58 @@ func TestRouter_error_response(t *testing.T) {
 	assert.Equal(t, api.CodeUnprocessableContent, env.Code)
 	assert.Equal(t, "bad data", env.Detail)
 }
+
+func TestRouter_auto_HEAD_from_GET(t *testing.T) {
+	t.Parallel()
+
+	type Resp struct {
+		Value string `json:"value"`
+	}
+
+	r := api.New()
+	api.Get(r, "/items", func(_ context.Context, _ *api.Void) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Value: "hi"}}, nil
+	})
+
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodHead, srv.URL+"/items", nil)
+	require.NoError(t, err)
+	resp, err := srv.Client().Do(req)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Empty(t, body, "HEAD response must have empty body")
+}
+
+func TestRouter_auto_OPTIONS_returns_allow(t *testing.T) {
+	t.Parallel()
+
+	r := api.New()
+	api.Get(r, "/items", func(_ context.Context, _ *api.Void) (*api.Void, error) {
+		return &api.Void{}, nil
+	})
+	api.Post(r, "/items", func(_ context.Context, _ *api.Void) (*api.Void, error) {
+		return &api.Void{}, nil
+	})
+
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodOptions, srv.URL+"/items", nil)
+	require.NoError(t, err)
+	resp, err := srv.Client().Do(req)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	allow := resp.Header.Get("Allow")
+	assert.Contains(t, allow, "GET")
+	assert.Contains(t, allow, "POST")
+	assert.Contains(t, allow, "OPTIONS")
+}

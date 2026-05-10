@@ -68,8 +68,14 @@ func encodeResponse(
 		}
 	}
 
+	// Announce trailers up-front so the stdlib emits them after the body.
+	for _, tr := range desc.trailers {
+		w.Header().Add("Trailer", tr.name)
+	}
+
 	if isNoBodyStatus(status) || desc.body == nil {
 		w.WriteHeader(status)
+		writeTrailers(w, rv, desc.trailers)
 		return
 	}
 
@@ -79,9 +85,27 @@ func encodeResponse(
 	case bodyKindCodec:
 		writeCodecBody(w, r, bv, status, codecs)
 	case bodyKindReader:
-		writeReaderBody(w, bv, status)
+		writeReaderBody(w, r, bv, status)
 	case bodyKindChan:
 		writeChanBody(r.Context(), w, bv, status)
+	}
+
+	writeTrailers(w, rv, desc.trailers)
+}
+
+// writeTrailers emits announced trailer headers after the body has been
+// written. Per net/http, trailer headers are set on w.Header() with the
+// "Trailer:" prefix; the stdlib transport detects and emits them.
+func writeTrailers(w http.ResponseWriter, rv reflect.Value, trailers []responseTrailerDesc) {
+	for _, tr := range trailers {
+		fv := rv.FieldByIndex(tr.index)
+		values := headerFieldValues(fv)
+		for _, v := range values {
+			if v == "" {
+				continue
+			}
+			w.Header().Add(http.TrailerPrefix+tr.name, v)
+		}
 	}
 }
 
@@ -100,14 +124,25 @@ func writeCodecBody(w http.ResponseWriter, r *http.Request, bv reflect.Value, st
 	enc.Encode(w, bv.Interface())
 }
 
-// writeReaderBody copies bytes from an io.Reader body to w.
-func writeReaderBody(w http.ResponseWriter, bv reflect.Value, status int) {
+// writeReaderBody copies bytes from an io.Reader body to w. If the reader
+// also implements io.Seeker, the body is served via http.ServeContent so the
+// client can request byte ranges (Range header) and conditional responses
+// (If-Modified-Since / If-None-Match) work as defined by RFC 9110.
+//
+// When ServeContent is used, the response status is owned by ServeContent
+// (200 OK or 206 Partial Content) — a Status field on the response struct is
+// ignored for ReadSeeker bodies.
+func writeReaderBody(w http.ResponseWriter, r *http.Request, bv reflect.Value, status int) {
 	if bv.IsNil() {
 		w.WriteHeader(status)
 		return
 	}
-	w.WriteHeader(status)
 	reader := bv.Interface().(io.Reader) //nolint:errcheck,forcetypeassert // descriptor guarantees io.Reader
+	if rs, ok := reader.(io.ReadSeeker); ok {
+		http.ServeContent(w, r, "", time.Time{}, rs)
+		return
+	}
+	w.WriteHeader(status)
 	//nolint:errcheck,gosec // best-effort streaming copy
 	io.Copy(w, reader)
 }

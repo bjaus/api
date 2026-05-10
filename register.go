@@ -15,6 +15,7 @@ type Registrar interface {
 	getErrorHandler() ErrorHandler
 	getMode() ValidationMode
 	getCodecs() *codecRegistry
+	getValidateResponses() bool
 	routeMiddleware() []Middleware
 	// errorOptionChain returns the scope's error-option list, outermost
 	// first. For a Router this is just the router's own options; for a
@@ -26,19 +27,21 @@ func (r *Router) getValidator() ValidatorFunc     { return r.validator }
 func (r *Router) getErrorHandler() ErrorHandler   { return r.errorHandler }
 func (r *Router) getMode() ValidationMode         { return r.mode }
 func (r *Router) getCodecs() *codecRegistry       { return r.codecs }
+func (r *Router) getValidateResponses() bool      { return r.validateResponses }
 func (r *Router) routeMiddleware() []Middleware   { return nil }
 func (r *Router) errorOptionChain() []ErrorOption { return r.errorOpts }
 
 // handlerConfig bundles the router-level configuration that buildHandler needs.
 type handlerConfig struct {
-	defaultStatus int
-	mode          ValidationMode
-	validator     ValidatorFunc
-	errHandler    ErrorHandler
-	codecs        *codecRegistry
-	requestDesc   *requestDescriptor
-	responseDesc  *responseDescriptor
-	errorTemplate *Err
+	defaultStatus     int
+	mode              ValidationMode
+	validator         ValidatorFunc
+	errHandler        ErrorHandler
+	codecs            *codecRegistry
+	requestDesc       *requestDescriptor
+	responseDesc      *responseDescriptor
+	errorTemplate     *Err
+	validateResponses bool
 }
 
 // register is the internal generic registration function.
@@ -98,14 +101,15 @@ func register[Req, Resp any](reg Registrar, method, pattern string, h Handler[Re
 	ri.errorCodes = append([]Code{}, ri.errorTemplate.documentedCodes...)
 
 	cfg := handlerConfig{
-		defaultStatus: ri.status,
-		mode:          ri.mode,
-		validator:     reg.getValidator(),
-		errHandler:    reg.getErrorHandler(),
-		codecs:        reg.getCodecs(),
-		requestDesc:   ri.requestDesc,
-		responseDesc:  ri.responseDesc,
-		errorTemplate: ri.errorTemplate,
+		defaultStatus:     ri.status,
+		mode:              ri.mode,
+		validator:         reg.getValidator(),
+		errHandler:        reg.getErrorHandler(),
+		codecs:            reg.getCodecs(),
+		requestDesc:       ri.requestDesc,
+		responseDesc:      ri.responseDesc,
+		errorTemplate:     ri.errorTemplate,
+		validateResponses: reg.getValidateResponses(),
 	}
 
 	ri.handler = buildHandler(h, cfg)
@@ -189,7 +193,9 @@ func buildHandler[Req, Resp any](h Handler[Req, Resp], cfg handlerConfig) http.H
 			return
 		}
 
-		ctx := r.Context()
+		ctx, bgQ := withBackgroundQueue(r.Context())
+		//nolint:contextcheck // background tasks are intentionally detached
+		defer runBackgroundTasks(bgQ)
 
 		steps := validationSteps(ctx, cfg.mode, req, runConstraints, runPerTypeValidator, runRouterValidator)
 		for _, step := range steps {
@@ -209,6 +215,20 @@ func buildHandler[Req, Resp any](h Handler[Req, Resp], cfg handlerConfig) http.H
 		if _, ok := any(resp).(*Void); ok || resp == nil {
 			w.WriteHeader(cfg.defaultStatus)
 			return
+		}
+
+		if cfg.validateResponses {
+			if err := validateConstraints(resp); err != nil {
+				opts := []ErrorOption{WithMessage("response failed validation")}
+				var ve ValidationErrors
+				if errors.As(err, &ve) {
+					for _, v := range ve {
+						opts = append(opts, WithDetail(v))
+					}
+				}
+				writeErr(w, r, Error(CodeInternal, opts...))
+				return
+			}
 		}
 
 		encodeResponse(w, r, resp, cfg.responseDesc, cfg.defaultStatus, cfg.codecs)
