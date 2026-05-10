@@ -16,7 +16,6 @@ func Recovery() Middleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if rec := recover(); rec != nil {
-					//nolint:gosec // G706: logging request metadata for debugging panics
 					slog.Error("panic recovered",
 						"panic", rec,
 						"stack", string(debug.Stack()),

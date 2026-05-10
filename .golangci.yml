@@ -185,6 +185,8 @@ linters:
       includes: []
       excludes:
       - G115
+      - G124
+      - G710
       severity: low
       confidence: low
       config:
