@@ -22,11 +22,6 @@ type HeaderObj struct {
 	Schema      JSONSchema `json:"schema"`
 }
 
-// ResponseHeaders is implemented by response types that declare headers in the OpenAPI spec.
-type ResponseHeaders interface {
-	ResponseHeaders() map[string]HeaderObj
-}
-
 // OpenAPISpec is the top-level OpenAPI 3.1 document.
 type OpenAPISpec struct {
 	OpenAPI    string                `json:"openapi"`
@@ -280,6 +275,43 @@ func buildSuccessResponse(ri *routeInfo, reg *schemaRegistry, codecCTs []string,
 	return status, ResponseObj{Description: "Successful response", Content: content}
 }
 
+// buildResponseHeaders produces the OpenAPI Headers map for a response from
+// the precomputed descriptor. Returns nil when the response declares no
+// header or cookie fields. Cookies share a single Set-Cookie entry whose
+// description enumerates the declared cookie names (sorted).
+func buildResponseHeaders(desc *responseDescriptor) map[string]HeaderObj {
+	if desc == nil || (len(desc.headers) == 0 && len(desc.cookies) == 0) {
+		return nil
+	}
+
+	out := make(map[string]HeaderObj, len(desc.headers)+1)
+
+	for _, h := range desc.headers {
+		out[h.name] = HeaderObj{
+			Description: h.description,
+			Schema:      typeToSchema(h.typ),
+		}
+	}
+
+	if len(desc.cookies) > 0 {
+		entries := make([]string, 0, len(desc.cookies))
+		for _, c := range desc.cookies {
+			if c.description != "" {
+				entries = append(entries, c.name+" ("+c.description+")")
+			} else {
+				entries = append(entries, c.name)
+			}
+		}
+		sort.Strings(entries)
+		out["Set-Cookie"] = HeaderObj{
+			Description: "Sets cookies: " + strings.Join(entries, ", "),
+			Schema:      JSONSchema{Type: "string"},
+		}
+	}
+
+	return out
+}
+
 // buildOperation creates an Operation from a routeInfo.
 func buildOperation(ri *routeInfo, reg *schemaRegistry, codecCTs []string) Operation {
 	op := Operation{
@@ -344,15 +376,11 @@ func buildOperation(ri *routeInfo, reg *schemaRegistry, codecCTs []string) Opera
 		}
 	}
 
-	// Add response headers if the response type implements ResponseHeaders.
-	if ri.respType != nil && ri.respType.Kind() == reflect.Struct {
-		ptr := reflect.New(ri.respType)
-		if rh, ok := ptr.Interface().(ResponseHeaders); ok {
-			statusKey := statusToString(status)
-			if resp, exists := op.Responses[statusKey]; exists {
-				resp.Headers = rh.ResponseHeaders()
-				op.Responses[statusKey] = resp
-			}
+	if hdrs := buildResponseHeaders(ri.responseDesc); hdrs != nil {
+		statusKey := statusToString(status)
+		if resp, exists := op.Responses[statusKey]; exists {
+			resp.Headers = hdrs
+			op.Responses[statusKey] = resp
 		}
 	}
 

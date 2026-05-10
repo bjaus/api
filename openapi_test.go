@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -766,25 +767,20 @@ func TestSpec_sse_stream_response(t *testing.T) {
 	assert.Equal(t, "string", resp200.Content["text/event-stream"].Schema.Type)
 }
 
-type respWithHeaders struct {
-	Value string `json:"value"`
-}
-
-func (*respWithHeaders) ResponseHeaders() map[string]api.HeaderObj {
-	return map[string]api.HeaderObj{
-		"X-Rate-Limit": {
-			Description: "Rate limit remaining",
-			Schema:      api.JSONSchema{Type: "integer"},
-		},
-	}
-}
-
-func TestSpec_response_headers_interface(t *testing.T) {
+func TestSpec_response_headers_from_descriptor(t *testing.T) {
 	t.Parallel()
 
+	type respHeaders struct {
+		RateLimit int    `header:"X-Rate-Limit" doc:"Rate limit remaining"`
+		TraceID   string `header:"X-Trace-Id"`
+		Body      struct {
+			Value string `json:"value"`
+		}
+	}
+
 	r := api.New()
-	api.Get(r, "/rate-limited", func(_ context.Context, _ *api.Void) (*respWithHeaders, error) {
-		return &respWithHeaders{Value: "ok"}, nil
+	api.Get(r, "/rate-limited", func(_ context.Context, _ *api.Void) (*respHeaders, error) {
+		return &respHeaders{}, nil
 	})
 
 	spec := r.Spec()
@@ -792,8 +788,47 @@ func TestSpec_response_headers_interface(t *testing.T) {
 	resp200, ok := op.Responses["200"]
 	require.True(t, ok)
 	require.NotNil(t, resp200.Headers)
-	assert.Contains(t, resp200.Headers, "X-Rate-Limit")
-	assert.Equal(t, "integer", resp200.Headers["X-Rate-Limit"].Schema.Type)
+
+	rate, ok := resp200.Headers["X-Rate-Limit"]
+	require.True(t, ok)
+	assert.Equal(t, "integer", rate.Schema.Type)
+	assert.Equal(t, "Rate limit remaining", rate.Description)
+
+	trace, ok := resp200.Headers["X-Trace-Id"]
+	require.True(t, ok)
+	assert.Equal(t, "string", trace.Schema.Type)
+	assert.Empty(t, trace.Description)
+}
+
+func TestSpec_response_set_cookie_from_descriptor(t *testing.T) {
+	t.Parallel()
+
+	type respCookies struct {
+		Session api.Cookie `cookie:"session" doc:"Session token"`
+		Pref    api.Cookie `cookie:"prefs"`
+		Body    struct {
+			OK bool `json:"ok"`
+		}
+	}
+
+	r := api.New()
+	api.Get(r, "/login", func(_ context.Context, _ *api.Void) (*respCookies, error) {
+		return &respCookies{}, nil
+	})
+
+	spec := r.Spec()
+	op := spec.Paths["/login"]["get"]
+	resp200, ok := op.Responses["200"]
+	require.True(t, ok)
+	require.NotNil(t, resp200.Headers)
+
+	sc, ok := resp200.Headers["Set-Cookie"]
+	require.True(t, ok)
+	assert.Equal(t, "string", sc.Schema.Type)
+	assert.Contains(t, sc.Description, "prefs")
+	assert.Contains(t, sc.Description, "session (Session token)")
+	// Sorted: "prefs" comes before "session (Session token)".
+	assert.Less(t, strings.Index(sc.Description, "prefs"), strings.Index(sc.Description, "session"))
 }
 
 func TestSpec_header_and_cookie_params(t *testing.T) {
