@@ -35,7 +35,7 @@ func TestCSRF_safe_methods_pass_without_token(t *testing.T) {
 			req, err := http.NewRequestWithContext(context.Background(), method, srv.URL+"/", nil)
 			require.NoError(t, err)
 
-			resp, err := http.DefaultClient.Do(req)
+			resp, err := srv.Client().Do(req)
 			require.NoError(t, err)
 			defer func() { require.NoError(t, resp.Body.Close()) }()
 
