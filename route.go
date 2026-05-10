@@ -31,6 +31,7 @@ type routeInfo struct {
 	reqType  reflect.Type
 	respType reflect.Type
 
+	requestDesc  *requestDescriptor
 	responseDesc *responseDescriptor
 
 	// errorOpts accumulates error-related options attached directly to

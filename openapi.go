@@ -342,7 +342,7 @@ func buildOperation(ri *routeInfo, reg *schemaRegistry, codecCTs []string) Opera
 	// Build parameters and request body from Req type.
 	if ri.reqType != nil && ri.reqType != reflect.TypeFor[Void]() {
 		op.Parameters = extractParameters(ri.reqType)
-		op.RequestBody = extractRequestBody(ri.reqType, ri.method, reg, codecCTs)
+		op.RequestBody = extractRequestBody(ri.reqType, ri.requestDesc, ri.method, reg, codecCTs)
 	}
 
 	// Build success response.
@@ -406,12 +406,15 @@ func buildOperation(ri *routeInfo, reg *schemaRegistry, codecCTs []string) Opera
 	return op
 }
 
-// extractParameters builds OpenAPI parameters from param-tagged fields.
+// extractParameters builds OpenAPI parameters from param-tagged fields,
+// including fields promoted from embedded structs.
 func extractParameters(t reflect.Type) []Parameter {
 	var params []Parameter
-	for i := range t.NumField() {
-		f := t.Field(i)
+	for _, f := range reflect.VisibleFields(t) {
 		if !f.IsExported() {
+			continue
+		}
+		if f.Anonymous && f.Type.Kind() == reflect.Struct {
 			continue
 		}
 
@@ -445,10 +448,16 @@ func extractParameters(t reflect.Type) []Parameter {
 	return params
 }
 
-// extractRequestBody builds an OpenAPI RequestBody if the request type has a body.
-func extractRequestBody(t reflect.Type, method string, reg *schemaRegistry, codecCTs []string) *RequestBody {
-	// Form-tagged struct → multipart/form-data.
-	if hasFormTags(t) {
+// extractRequestBody builds an OpenAPI RequestBody from the request
+// descriptor's category. The descriptor was built once at registration and
+// understands embedded fields.
+func extractRequestBody(t reflect.Type, desc *requestDescriptor, method string, reg *schemaRegistry, codecCTs []string) *RequestBody {
+	if desc == nil {
+		return nil
+	}
+
+	switch desc.category {
+	case catForm:
 		schema := formFieldsToSchema(t)
 		return &RequestBody{
 			Required: true,
@@ -456,47 +465,41 @@ func extractRequestBody(t reflect.Type, method string, reg *schemaRegistry, code
 				"multipart/form-data": {Schema: &schema},
 			},
 		}
-	}
-
-	// Has Body field → body is the Body field's type.
-	if bodyField, ok := t.FieldByName("Body"); ok {
-		schema := reg.typeToSchema(bodyField.Type)
+	case catMixed:
+		schema := reg.typeToSchema(desc.body.typ)
 		content := make(map[string]MediaObj, len(codecCTs))
 		for _, ct := range codecCTs {
 			content[ct] = MediaObj{Schema: &schema}
 		}
-		return &RequestBody{
-			Required: true,
-			Content:  content,
+		return &RequestBody{Required: true, Content: content}
+	case catBodyOnly:
+		if method != http.MethodPost && method != http.MethodPut && method != http.MethodPatch {
+			return nil
 		}
-	}
-
-	// No param tags → entire struct is body (only for POST/PUT/PATCH).
-	if !hasParamTags(t) && (method == "POST" || method == "PUT" || method == "PATCH") {
 		schema := reg.typeToSchema(t)
 		content := make(map[string]MediaObj, len(codecCTs))
 		for _, ct := range codecCTs {
 			content[ct] = MediaObj{Schema: &schema}
 		}
-		return &RequestBody{
-			Required: true,
-			Content:  content,
-		}
+		return &RequestBody{Required: true, Content: content}
 	}
 
 	return nil
 }
 
-// formFieldsToSchema builds a JSONSchema from form-tagged fields.
+// formFieldsToSchema builds a JSONSchema from form-tagged fields, including
+// fields promoted from embedded structs.
 func formFieldsToSchema(t reflect.Type) JSONSchema {
 	schema := JSONSchema{
 		Type:       "object",
 		Properties: make(map[string]JSONSchema),
 	}
 
-	for i := range t.NumField() {
-		f := t.Field(i)
+	for _, f := range reflect.VisibleFields(t) {
 		if !f.IsExported() {
+			continue
+		}
+		if f.Anonymous && f.Type.Kind() == reflect.Struct {
 			continue
 		}
 

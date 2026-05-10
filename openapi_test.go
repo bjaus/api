@@ -890,3 +890,60 @@ func TestSpec_unexported_field_ignored_in_params(t *testing.T) {
 	assert.Equal(t, "name", op.Parameters[0].Name)
 	assert.Equal(t, "query", op.Parameters[0].In)
 }
+
+func TestSpec_request_parameters_from_embedded_struct(t *testing.T) {
+	t.Parallel()
+
+	type AuthHeaders struct {
+		Token string `header:"Authorization" doc:"Bearer token"`
+	}
+	type Req struct {
+		AuthHeaders
+		ID string `path:"id"`
+	}
+
+	r := api.New()
+	api.Get(r, "/items/{id}", func(_ context.Context, _ *Req) (*api.Void, error) {
+		return &api.Void{}, nil
+	})
+
+	spec := r.Spec()
+	op := spec.Paths["/items/{id}"]["get"]
+
+	names := make(map[string]api.Parameter, len(op.Parameters))
+	for _, p := range op.Parameters {
+		names[p.Name] = p
+	}
+
+	require.Contains(t, names, "Authorization")
+	require.Contains(t, names, "id")
+	assert.Equal(t, "header", names["Authorization"].In)
+	assert.Equal(t, "Bearer token", names["Authorization"].Description)
+}
+
+func TestSpec_form_schema_from_embedded_struct(t *testing.T) {
+	t.Parallel()
+
+	type FormBase struct {
+		Title string `form:"title" required:"true"`
+	}
+	type Req struct {
+		FormBase
+		Note string `form:"note"`
+	}
+
+	r := api.New()
+	api.Post(r, "/upload", func(_ context.Context, _ *Req) (*api.Void, error) {
+		return &api.Void{}, nil
+	})
+
+	spec := r.Spec()
+	op := spec.Paths["/upload"]["post"]
+	require.NotNil(t, op.RequestBody)
+	media, ok := op.RequestBody.Content["multipart/form-data"]
+	require.True(t, ok)
+	require.NotNil(t, media.Schema)
+	assert.Contains(t, media.Schema.Properties, "title")
+	assert.Contains(t, media.Schema.Properties, "note")
+	assert.Contains(t, media.Schema.Required, "title")
+}

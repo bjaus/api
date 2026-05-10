@@ -364,62 +364,6 @@ func TestForm_constraint_validation(t *testing.T) {
 	}
 }
 
-func TestHasFormTags(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		input any
-		want  bool
-	}{
-		"with form tag": {
-			input: struct {
-				Title string `form:"title"`
-			}{},
-			want: true,
-		},
-		"without form tag": {
-			input: struct {
-				Title string `json:"title"`
-			}{},
-			want: false,
-		},
-		"with mixed tags": {
-			input: struct {
-				ID    string `path:"id"`
-				Title string `form:"title"`
-			}{},
-			want: true,
-		},
-		"unexported form field": {
-			input: struct {
-				title string `form:"title"`
-			}{},
-			want: false,
-		},
-		"pointer type": {
-			input: (*struct {
-				Title string `form:"title"`
-			})(nil),
-			want: true,
-		},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			got := api.HasFormTags(reflect.TypeOf(tc.input))
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
-func TestHasFormTags_non_struct(t *testing.T) {
-	t.Parallel()
-
-	assert.False(t, api.HasFormTags(reflect.TypeFor[string]()))
-	assert.False(t, api.HasFormTags(reflect.TypeFor[int]()))
-}
-
 func TestForm_isParamField_excludes_form_fields(t *testing.T) {
 	t.Parallel()
 
@@ -900,4 +844,48 @@ func TestForm_multiple_file_upload_openapi(t *testing.T) {
 	assert.Equal(t, "binary", filesProp.Items.Format)
 	assert.Equal(t, "Upload multiple files", filesProp.Description)
 	assert.Contains(t, media.Schema.Required, "files")
+}
+
+func TestForm_embedded_form_fields_bind(t *testing.T) {
+	t.Parallel()
+
+	type FormBase struct {
+		Title string `form:"title"`
+	}
+	type Req struct {
+		FormBase
+		Note string `form:"note"`
+	}
+	type Resp struct {
+		Title string `json:"title"`
+		Note  string `json:"note"`
+	}
+
+	r := api.New()
+	api.Post(r, "/upload", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{Title: req.Title, Note: req.Note}}, nil
+	})
+
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+
+	body := &bytes.Buffer{}
+	w := multipart.NewWriter(body)
+	require.NoError(t, w.WriteField("title", "hello"))
+	require.NoError(t, w.WriteField("note", "world"))
+	require.NoError(t, w.Close())
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, srv.URL+"/upload", body)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var got Resp
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&got))
+	assert.Equal(t, "hello", got.Title)
+	assert.Equal(t, "world", got.Note)
 }

@@ -144,6 +144,170 @@ func buildResponseDescriptor(t reflect.Type) (*responseDescriptor, error) {
 	return desc, nil
 }
 
+// requestDescriptor is a precomputed map of a request struct's tagged
+// fields, built once at route registration. The decoder iterates the
+// descriptor's slices per request instead of reparsing tags. Walks
+// reflect.VisibleFields so embedded structs contribute promoted fields.
+type requestDescriptor struct {
+	category   requestCategory
+	rawRequest *requestFieldDesc  // nil if no RawRequest field
+	body       *requestFieldDesc  // nil if no Body field
+	params     []requestParamDesc // path/query/header/cookie bindings
+	forms      []requestFormDesc  // multipart form bindings
+}
+
+// requestFieldDesc locates a field by its reflect.VisibleFields index path.
+type requestFieldDesc struct {
+	index []int
+	typ   reflect.Type
+}
+
+// paramIn identifies the wire-level source of a parameter binding.
+type paramIn int
+
+const (
+	paramInPath paramIn = iota
+	paramInQuery
+	paramInHeader
+	paramInCookie
+)
+
+type requestParamDesc struct {
+	requestFieldDesc
+	in           paramIn
+	name         string
+	defaultValue string
+}
+
+// formFieldKind identifies how a form field is bound at request time.
+type formFieldKind int
+
+const (
+	formScalar formFieldKind = iota
+	formSingleFile
+	formMultiFile
+)
+
+type requestFormDesc struct {
+	requestFieldDesc
+	name string
+	kind formFieldKind
+}
+
+var (
+	rawRequestType    = reflect.TypeFor[RawRequest]()
+	fileUploadType    = reflect.TypeFor[FileUpload]()
+	fileUploadSlice   = reflect.TypeFor[[]FileUpload]()
+	voidRequestType   = reflect.TypeFor[Void]()
+	requestParamTagIn = map[string]paramIn{
+		"path":   paramInPath,
+		"query":  paramInQuery,
+		"header": paramInHeader,
+		"cookie": paramInCookie,
+	}
+)
+
+// buildRequestDescriptor walks the request type once and produces a
+// descriptor keyed by field index paths. Returns an error if the type is
+// not a struct (after pointer unwrapping) or if two tagged fields collide
+// on the same param/form name within the same source.
+func buildRequestDescriptor(t reflect.Type) (*requestDescriptor, error) {
+	if t == voidRequestType {
+		return &requestDescriptor{category: catVoid}, nil
+	}
+	t = derefType(t)
+	if t.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("request type must be a struct, got %s", t.Kind())
+	}
+
+	desc := &requestDescriptor{}
+	seenParam := map[paramIn]map[string]struct{}{}
+	seenForm := map[string]struct{}{}
+
+	for _, f := range reflect.VisibleFields(t) {
+		if !f.IsExported() {
+			continue
+		}
+
+		// Anonymous struct embedding: the field itself is skipped (its leaves
+		// appear separately in VisibleFields), unless the type IS RawRequest,
+		// which we set as a whole value.
+		if f.Anonymous && f.Type.Kind() == reflect.Struct && f.Type != rawRequestType {
+			continue
+		}
+
+		if f.Type == rawRequestType {
+			if desc.rawRequest != nil {
+				return nil, fmt.Errorf("multiple RawRequest fields in request type %s", t)
+			}
+			desc.rawRequest = &requestFieldDesc{index: f.Index, typ: f.Type}
+			continue
+		}
+
+		if f.Name == "Body" {
+			if desc.body != nil {
+				return nil, fmt.Errorf("multiple Body fields in request type %s", t)
+			}
+			desc.body = &requestFieldDesc{index: f.Index, typ: f.Type}
+			continue
+		}
+
+		fd := requestFieldDesc{index: f.Index, typ: f.Type}
+
+		for tagName, in := range requestParamTagIn {
+			name := f.Tag.Get(tagName)
+			if name == "" {
+				continue
+			}
+			if seenParam[in] == nil {
+				seenParam[in] = map[string]struct{}{}
+			}
+			if _, dup := seenParam[in][name]; dup {
+				return nil, fmt.Errorf("duplicate %s param %q in request type %s", tagName, name, t)
+			}
+			seenParam[in][name] = struct{}{}
+			desc.params = append(desc.params, requestParamDesc{
+				requestFieldDesc: fd,
+				in:               in,
+				name:             name,
+				defaultValue:     f.Tag.Get("default"),
+			})
+		}
+
+		if name := f.Tag.Get("form"); name != "" {
+			if _, dup := seenForm[name]; dup {
+				return nil, fmt.Errorf("duplicate form field %q in request type %s", name, t)
+			}
+			seenForm[name] = struct{}{}
+			kind := formScalar
+			switch f.Type {
+			case fileUploadType:
+				kind = formSingleFile
+			case fileUploadSlice:
+				kind = formMultiFile
+			}
+			desc.forms = append(desc.forms, requestFormDesc{
+				requestFieldDesc: fd,
+				name:             name,
+				kind:             kind,
+			})
+		}
+	}
+
+	switch {
+	case len(desc.forms) > 0:
+		desc.category = catForm
+	case desc.body != nil:
+		desc.category = catMixed
+	case len(desc.params) > 0 || desc.rawRequest != nil:
+		desc.category = catParams
+	default:
+		desc.category = catBodyOnly
+	}
+
+	return desc, nil
+}
+
 // classifyBodyKind picks the emission path for a Body field based on its
 // static type. The field's declared type wins: a field typed io.Reader
 // streams even if the concrete value also satisfies some other interface.

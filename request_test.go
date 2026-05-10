@@ -961,3 +961,66 @@ func TestRequest_mixed_body_invalid_json(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
+
+type authHeaders struct {
+	Token string `header:"Authorization" doc:"Bearer token"`
+	Trace string `header:"X-Request-Id"`
+}
+
+func TestRequest_embedded_param_fields_bind(t *testing.T) {
+	t.Parallel()
+
+	type Req struct {
+		authHeaders
+		ID string `path:"id"`
+	}
+	type Resp struct {
+		Token string `json:"token"`
+		Trace string `json:"trace"`
+		ID    string `json:"id"`
+	}
+
+	r := api.New()
+	api.Get(r, "/items/{id}", func(_ context.Context, req *Req) (*api.Resp[Resp], error) {
+		return &api.Resp[Resp]{Body: Resp{
+			Token: req.Token,
+			Trace: req.Trace,
+			ID:    req.ID,
+		}}, nil
+	})
+
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/items/42", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer abc")
+	req.Header.Set("X-Request-Id", "trace-1")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var got Resp
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&got))
+	assert.Equal(t, "Bearer abc", got.Token)
+	assert.Equal(t, "trace-1", got.Trace)
+	assert.Equal(t, "42", got.ID)
+}
+
+func TestRequest_duplicate_param_fails_at_registration(t *testing.T) {
+	t.Parallel()
+
+	type Req struct {
+		A int `query:"limit"`
+		B int `query:"limit"`
+	}
+
+	r := api.New()
+	assert.Panics(t, func() {
+		api.Get(r, "/list", func(_ context.Context, _ *Req) (*api.Void, error) {
+			return &api.Void{}, nil
+		})
+	})
+}

@@ -36,6 +36,7 @@ type handlerConfig struct {
 	validator     ValidatorFunc
 	errHandler    ErrorHandler
 	codecs        *codecRegistry
+	requestDesc   *requestDescriptor
 	responseDesc  *responseDescriptor
 	errorTemplate *Err
 }
@@ -73,6 +74,12 @@ func register[Req, Resp any](reg Registrar, method, pattern string, h Handler[Re
 		ri.responseDesc = d
 	}
 
+	reqDesc, err := buildRequestDescriptor(ri.reqType)
+	if err != nil {
+		panic(err)
+	}
+	ri.requestDesc = reqDesc
+
 	// Merge scope error options: router chain → group chain → route options.
 	// Apply them to a fresh *Err that serves as the per-route template.
 	chain := reg.errorOptionChain()
@@ -96,6 +103,7 @@ func register[Req, Resp any](reg Registrar, method, pattern string, h Handler[Re
 		validator:     reg.getValidator(),
 		errHandler:    reg.getErrorHandler(),
 		codecs:        reg.getCodecs(),
+		requestDesc:   ri.requestDesc,
 		responseDesc:  ri.responseDesc,
 		errorTemplate: ri.errorTemplate,
 	}
@@ -175,7 +183,7 @@ func buildHandler[Req, Resp any](h Handler[Req, Resp], cfg handlerConfig) http.H
 			}
 		}
 
-		req, err := decodeRequest[Req](r, cfg.codecs)
+		req, err := decodeRequest[Req](r, cfg.codecs, cfg.requestDesc)
 		if err != nil {
 			writeErr(w, r, Error(CodeBadRequest, WithMessage(err.Error())))
 			return

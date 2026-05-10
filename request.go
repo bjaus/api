@@ -23,52 +23,33 @@ const (
 	catForm                            // has form tags (multipart/form-data binding)
 )
 
-// classifyRequest determines how a request type should be decoded.
-func classifyRequest(t reflect.Type) requestCategory {
-	if t == reflect.TypeFor[Void]() {
-		return catVoid
-	}
-	if hasFormTags(t) {
-		return catForm
-	}
-	if hasBodyField(t) {
-		return catMixed
-	}
-	if hasParamTags(t) || hasRawRequest(t) {
-		return catParams
-	}
-	return catBodyOnly
-}
-
-// decodeRequest creates a new Req value and populates it from the HTTP request.
-func decodeRequest[Req any](r *http.Request, codecs *codecRegistry) (*Req, error) {
+// decodeRequest creates a new Req value and populates it from the HTTP request,
+// using the precomputed request descriptor to avoid per-request reflection.
+func decodeRequest[Req any](r *http.Request, codecs *codecRegistry, desc *requestDescriptor) (*Req, error) {
 	req := new(Req)
-	t := reflect.TypeFor[Req]()
-	cat := classifyRequest(t)
 
-	if cat == catVoid {
+	if desc.category == catVoid {
 		return req, nil
 	}
 
-	// Always bind params — handles path/query/header/cookie AND RawRequest injection.
-	if err := bindParams(req, r); err != nil {
+	v := reflect.ValueOf(req).Elem()
+
+	if err := bindParams(v, r, desc); err != nil {
 		return nil, err
 	}
 
-	// Decode body.
-	switch cat {
+	switch desc.category {
 	case catBodyOnly:
 		if err := decodeBody(r, req, codecs); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrBindBody, err)
 		}
 	case catMixed:
-		bodyField := reflect.ValueOf(req).Elem().FieldByName("Body")
-		bodyPtr := bodyField.Addr().Interface()
+		bodyPtr := v.FieldByIndex(desc.body.index).Addr().Interface()
 		if err := decodeBody(r, bodyPtr, codecs); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrBindBody, err)
 		}
 	case catForm:
-		if err := bindFormFields(req, r); err != nil {
+		if err := bindFormFields(v, r, desc); err != nil {
 			return nil, err
 		}
 	}
@@ -76,117 +57,80 @@ func decodeRequest[Req any](r *http.Request, codecs *codecRegistry) (*Req, error
 	return req, nil
 }
 
-// bindParams binds path, query, header, and cookie values to struct fields.
-func bindParams(target any, r *http.Request) error {
-	v := reflect.ValueOf(target)
-	if v.Kind() == reflect.Pointer {
-		v = v.Elem()
+// bindParams binds path/query/header/cookie values and injects RawRequest
+// using the descriptor's cached field index paths.
+func bindParams(v reflect.Value, r *http.Request, desc *requestDescriptor) error {
+	if desc.rawRequest != nil {
+		v.FieldByIndex(desc.rawRequest.index).Set(reflect.ValueOf(RawRequest{Request: r}))
 	}
 
-	t := v.Type()
-	for i := range t.NumField() {
-		f := t.Field(i)
-		if !f.IsExported() {
-			continue
-		}
-
-		// Skip the Body field — it's decoded separately.
-		if f.Name == "Body" {
-			continue
-		}
-
-		field := v.Field(i)
-
-		if name := f.Tag.Get("path"); name != "" {
-			val := r.PathValue(name)
-			if val != "" {
-				if err := setFieldValue(field, val); err != nil {
-					return fmt.Errorf("%w: %s: %w", ErrBindPath, name, err)
-				}
-			}
-		}
-
-		if name := f.Tag.Get("query"); name != "" {
-			val := r.URL.Query().Get(name)
+	for _, p := range desc.params {
+		var val string
+		switch p.in {
+		case paramInPath:
+			val = r.PathValue(p.name)
+		case paramInQuery:
+			val = r.URL.Query().Get(p.name)
 			if val == "" {
-				val = f.Tag.Get("default")
+				val = p.defaultValue
 			}
-			if val != "" {
-				if err := setFieldValue(field, val); err != nil {
-					return fmt.Errorf("%w: %s: %w", ErrBindQuery, name, err)
-				}
-			}
-		}
-
-		if name := f.Tag.Get("header"); name != "" {
-			val := r.Header.Get(name)
+		case paramInHeader:
+			val = r.Header.Get(p.name)
 			if val == "" {
-				val = f.Tag.Get("default")
+				val = p.defaultValue
 			}
-			if val != "" {
-				if err := setFieldValue(field, val); err != nil {
-					return fmt.Errorf("%w: %s: %w", ErrBindHeader, name, err)
-				}
-			}
-		}
-
-		if name := f.Tag.Get("cookie"); name != "" {
-			var val string
-			if c, err := r.Cookie(name); err == nil {
+		case paramInCookie:
+			if c, err := r.Cookie(p.name); err == nil {
 				val = c.Value
 			}
 			if val == "" {
-				val = f.Tag.Get("default")
-			}
-			if val != "" {
-				if err := setFieldValue(field, val); err != nil {
-					return fmt.Errorf("%w: %s: %w", ErrBindCookie, name, err)
-				}
+				val = p.defaultValue
 			}
 		}
-
-		// Embed RawRequest: inject *http.Request.
-		if f.Type == reflect.TypeFor[RawRequest]() {
-			field.Set(reflect.ValueOf(RawRequest{Request: r}))
+		if val == "" {
+			continue
+		}
+		if err := setFieldValue(v.FieldByIndex(p.index), val); err != nil {
+			return fmt.Errorf("%w: %s: %w", bindErrFor(p.in), p.name, err)
 		}
 	}
 
 	return nil
 }
 
-// bindFormFields binds multipart form fields and files to struct fields tagged with "form".
-func bindFormFields(target any, r *http.Request) error {
+// bindErrFor returns the sentinel bind error for a parameter source.
+func bindErrFor(in paramIn) error {
+	switch in {
+	case paramInPath:
+		return ErrBindPath
+	case paramInQuery:
+		return ErrBindQuery
+	case paramInHeader:
+		return ErrBindHeader
+	case paramInCookie:
+		return ErrBindCookie
+	}
+	return ErrBindPath
+}
+
+// bindFormFields binds multipart form fields and files using the
+// descriptor's cached form field map.
+func bindFormFields(v reflect.Value, r *http.Request, desc *requestDescriptor) error {
 	if err := r.ParseMultipartForm(maxMultipartMemory); err != nil {
 		return fmt.Errorf("%w: %w", ErrBindForm, err)
 	}
 
-	v := reflect.ValueOf(target)
-	if v.Kind() == reflect.Pointer {
-		v = v.Elem()
-	}
+	for _, ff := range desc.forms {
+		field := v.FieldByIndex(ff.index)
 
-	t := v.Type()
-	for i := range t.NumField() {
-		f := t.Field(i)
-		if !f.IsExported() {
-			continue
-		}
-
-		name := f.Tag.Get("form")
-		if name == "" {
-			continue
-		}
-
-		field := v.Field(i)
-
-		// FileUpload fields: use r.FormFile.
-		if f.Type == reflect.TypeFor[FileUpload]() {
-			file, header, err := r.FormFile(name)
+		switch ff.kind {
+		case formSingleFile:
+			file, header, err := r.FormFile(ff.name)
 			if errors.Is(err, http.ErrMissingFile) {
-				continue // optional file — leave zero value
+				continue
 			}
 			if err != nil {
-				return fmt.Errorf("%w: %s: %w", ErrBindForm, name, err)
+				return fmt.Errorf("%w: %s: %w", ErrBindForm, ff.name, err)
 			}
 			field.Set(reflect.ValueOf(FileUpload{
 				Filename: header.Filename,
@@ -194,20 +138,17 @@ func bindFormFields(target any, r *http.Request) error {
 				Header:   header,
 				file:     file,
 			}))
-			continue
-		}
 
-		// []FileUpload fields: iterate all files for this field name.
-		if f.Type == reflect.TypeFor[[]FileUpload]() {
-			if r.MultipartForm == nil || len(r.MultipartForm.File[name]) == 0 {
-				continue // no files — leave nil slice
+		case formMultiFile:
+			if r.MultipartForm == nil || len(r.MultipartForm.File[ff.name]) == 0 {
+				continue
 			}
-			headers := r.MultipartForm.File[name]
+			headers := r.MultipartForm.File[ff.name]
 			uploads := make([]FileUpload, 0, len(headers))
 			for _, header := range headers {
 				file, err := header.Open()
 				if err != nil {
-					return fmt.Errorf("%w: %s: %w", ErrBindForm, name, err)
+					return fmt.Errorf("%w: %s: %w", ErrBindForm, ff.name, err)
 				}
 				uploads = append(uploads, FileUpload{
 					Filename: header.Filename,
@@ -217,14 +158,14 @@ func bindFormFields(target any, r *http.Request) error {
 				})
 			}
 			field.Set(reflect.ValueOf(uploads))
-			continue
-		}
 
-		// Scalar fields: use r.FormValue.
-		val := r.FormValue(name)
-		if val != "" {
+		case formScalar:
+			val := r.FormValue(ff.name)
+			if val == "" {
+				continue
+			}
 			if err := setFieldValue(field, val); err != nil {
-				return fmt.Errorf("%w: %s: %w", ErrBindForm, name, err)
+				return fmt.Errorf("%w: %s: %w", ErrBindForm, ff.name, err)
 			}
 		}
 	}
