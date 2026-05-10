@@ -17,10 +17,13 @@ type responseDescriptor struct {
 }
 
 // responseFieldDesc locates a scalar field by its reflect.VisibleFields
-// index path (handles embedded structs).
+// index path (handles embedded structs). typ and description are populated
+// for spec generation; the runtime emitter consults only index and kind.
 type responseFieldDesc struct {
-	index []int
-	kind  reflect.Kind
+	index       []int
+	kind        reflect.Kind
+	typ         reflect.Type
+	description string
 }
 
 type responseHeaderDesc struct {
@@ -83,7 +86,12 @@ func buildResponseDescriptor(t reflect.Type) (*responseDescriptor, error) {
 			continue
 		}
 
-		fd := responseFieldDesc{index: f.Index, kind: f.Type.Kind()}
+		fd := responseFieldDesc{
+			index:       f.Index,
+			kind:        f.Type.Kind(),
+			typ:         f.Type,
+			description: f.Tag.Get("doc"),
+		}
 
 		if f.Name == "Body" {
 			desc.body = &responseBodyDesc{
